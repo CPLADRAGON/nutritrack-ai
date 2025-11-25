@@ -1,0 +1,7 @@
+{
+  "name": "NutriTrack AI",
+  "description": "A personal nutrition assistant that uses AI to analyze food photos, track macros, and provide personalized dietary advice based on your body metrics.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
