@@ -1,6 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { UserProfile, MealLog } from "../types";
 
+// Declare process to satisfy TS compiler since Vite injects it
+declare const process: {
+  env: {
+    API_KEY: string;
+  };
+};
+
 const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Schema for Food Analysis

@@ -1,4 +1,4 @@
-import { AppState, MealLog, UserProfile, WeightLog } from "../types";
+import { MealLog, UserProfile, WeightLog } from "../types";
 
 const STORAGE_KEY_PREFIX = 'nutritrack_';
 

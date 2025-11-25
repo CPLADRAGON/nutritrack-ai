@@ -12,7 +12,7 @@ interface DashboardProps {
   onUpdateWeight: (history: WeightLog[]) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory, onUpdateUser, onUpdateLogs, onUpdateWeight }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory: _weightHistory, onUpdateUser, onUpdateLogs, onUpdateWeight: _onUpdateWeight }) => {
   const [showLogModal, setShowLogModal] = useState(false);
   const [showGoalsModal, setShowGoalsModal] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
