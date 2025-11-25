@@ -30,7 +30,7 @@ export class SheetService {
     // 1. Search for existing spreadsheet
     const query = `name = '${SPREADSHEET_TITLE}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
     const searchResult = await this.fetch(`${DRIVE_API_BASE}?q=${encodeURIComponent(query)}`);
-    
+
     if (searchResult.files && searchResult.files.length > 0) {
       this.spreadsheetId = searchResult.files[0].id;
       return true; // Found
@@ -54,7 +54,7 @@ export class SheetService {
       body: JSON.stringify(body)
     });
     this.spreadsheetId = result.spreadsheetId;
-    
+
     // Initialize headers
     await this.writeRange('Profile!A1:M1', [['ID', 'Name', 'Age', 'Gender', 'Height', 'Weight', 'Activity', 'Goal', 'TargetCals', 'TargetP', 'TargetC', 'TargetF', 'CreatedAt']]);
     await this.writeRange('Logs!A1:I1', [['ID', 'Date', 'Time', 'Type', 'Description', 'Calories', 'P', 'C', 'F']]);
@@ -74,11 +74,11 @@ export class SheetService {
 
   async loadData(): Promise<{ user: UserProfile | null, logs: MealLog[], weight: WeightLog[] }> {
     if (!this.spreadsheetId) throw new Error("Spreadsheet not initialized");
-    
+
     // Batch get all sheets
     const url = `${SHEETS_API_BASE}/${this.spreadsheetId}/values:batchGet?ranges=Profile!A2:M2&ranges=Logs!A2:I&ranges=Weight!A2:B`;
     const result = await this.fetch(url);
-    
+
     const profileRows = result.valueRanges[0].values;
     const logRows = result.valueRanges[1].values;
     const weightRows = result.valueRanges[2].values;
@@ -138,19 +138,24 @@ export class SheetService {
     // In a production app with huge data, we would append or update specific rows.
     // We clear the sheet first or just overwrite.
     // Note: This approach assumes < 2000 logs which is fine for personal use.
-    
+
     // 1. Clear existing logs (optional but safer for deletes) - simpler to just overwrite a large range
     // but Sheets API overwrite doesn't clear 'remaining' rows if new list is shorter.
     // So we clear first.
     if (!this.spreadsheetId) return;
-    
+
     const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Logs!A2:I:clear`;
     await this.fetch(clearUrl, { method: 'POST' });
 
     // 2. Write new logs
     // Sort chronologically for sheet (logs passed in might be reverse chrono)
-    const sortedLogs = [...logs].sort((a, b) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime());
-    
+    // We use string comparison for robustness (Timezone Agnostic)
+    const sortedLogs = [...logs].sort((a, b) => {
+      const dateA = a.date + a.time;
+      const dateB = b.date + b.time;
+      return dateA.localeCompare(dateB);
+    });
+
     if (sortedLogs.length === 0) return;
 
     const rows = sortedLogs.map(l => [
@@ -161,13 +166,16 @@ export class SheetService {
   }
 
   async saveWeight(history: WeightLog[]) {
-     if (!this.spreadsheetId) return;
-     const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Weight!A2:B:clear`;
-     await this.fetch(clearUrl, { method: 'POST' });
+    if (!this.spreadsheetId) return;
+    const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Weight!A2:B:clear`;
+    await this.fetch(clearUrl, { method: 'POST' });
 
-     if (history.length === 0) return;
-     
-     const rows = history.map(w => [w.date, w.weight]);
-     await this.writeRange(`Weight!A2:B${2 + rows.length - 1}`, rows);
+    if (history.length === 0) return;
+
+    // Ensure history is sorted by date string before saving
+    const sortedHistory = [...history].sort((a, b) => a.date.localeCompare(b.date));
+
+    const rows = sortedHistory.map(w => [w.date, w.weight]);
+    await this.writeRange(`Weight!A2:B${2 + rows.length - 1}`, rows);
   }
 }

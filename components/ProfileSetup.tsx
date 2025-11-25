@@ -25,7 +25,7 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
     try {
       // 1. Get AI recommendations
       const plan = await generatePlanFromProfile(formData as any);
-      
+
       // 2. Construct full profile
       const newProfile: UserProfile = {
         id: Date.now().toString(),
@@ -40,7 +40,8 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
         targetProtein: plan.targetProtein,
         targetCarbs: plan.targetCarbs,
         targetFat: plan.targetFat,
-        createdAt: new Date().toISOString()
+        // Use Singapore time for the record creation date
+        createdAt: new Date().toLocaleString('en-US', { timeZone: 'Asia/Singapore' })
       };
 
       onComplete(newProfile);
@@ -60,11 +61,11 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
   return (
     <div className="max-w-lg mx-auto bg-white p-8 rounded-2xl shadow-lg mt-10">
       <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Welcome to NutriTrack</h2>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 text-sm">Cancel</button>
+        <h2 className="text-2xl font-bold text-gray-900">Welcome to NutriTrack</h2>
+        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 text-sm">Cancel</button>
       </div>
       <p className="text-gray-500 mb-6">Let's calculate your personalized nutrition plan.</p>
-      
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700">Name</label>
@@ -114,8 +115,8 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
           </select>
         </div>
 
-        <button 
-          type="submit" 
+        <button
+          type="submit"
           disabled={loading}
           className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50"
         >

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, MealLog, WeightLog, MealType } from '../types';
 import { analyzeFoodImage, getDailyAdvice, getFoodSuggestion } from '../services/geminiService';
+import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line
@@ -20,7 +21,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const [showGoalsModal, setShowGoalsModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isSuggesting, setIsSuggesting] = useState(false); // State for AI suggestion loading
+  const [isSuggesting, setIsSuggesting] = useState(false);
   const [aiAdvice, setAiAdvice] = useState<string>('');
 
   // Chart Range State
@@ -35,10 +36,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     fat: user.targetFat
   });
 
-  // New Log State
+  // New Log State (Defaults to Singapore Time)
   const [newLog, setNewLog] = useState<Partial<MealLog>>({
-    date: new Date().toISOString().split('T')[0],
-    time: new Date().toTimeString().substring(0, 5),
+    date: getSingaporeDate(),
+    time: getSingaporeTime(),
     type: MealType.LUNCH,
     description: '',
     calories: 0,
@@ -47,16 +48,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     fat: 0
   });
 
-  // New Weight Log State
+  // New Weight Log State (Defaults to Singapore Date)
   const [newWeightLog, setNewWeightLog] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: getSingaporeDate(),
     weight: user.weight
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Stats Calculation
-  const today = new Date().toISOString().split('T')[0];
+  // Stats Calculation (Based on Singapore Date)
+  const today = getSingaporeDate();
   const todayLogs = logs.filter(l => l.date === today);
 
   const totalCalories = todayLogs.reduce((acc, curr) => acc + curr.calories, 0);
@@ -139,9 +140,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     onUpdateLogs(updatedLogs);
 
     setShowLogModal(false);
+    // Reset form to Singapore defaults
     setNewLog({
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toTimeString().substring(0, 5),
+      date: getSingaporeDate(),
+      time: getSingaporeTime(),
       type: MealType.LUNCH,
       description: '',
       calories: 0,
@@ -174,7 +176,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     if (!weightVal || weightVal <= 0) return;
 
     // 1. Update Weight History
-    // Check if entry exists for this date, if so update it, else add new
     const existingIndex = weightHistory.findIndex(w => w.date === newWeightLog.date);
     let updatedHistory = [...weightHistory];
 
@@ -184,13 +185,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       updatedHistory.push({ date: newWeightLog.date, weight: weightVal });
     }
 
-    // Sort by date
-    updatedHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // Sort by date string (YYYY-MM-DD works with string sort)
+    updatedHistory.sort((a, b) => a.date.localeCompare(b.date));
     onUpdateWeight(updatedHistory);
 
-    // 2. Update User Profile Current Weight if date is today or later
-    const isLatest = new Date(newWeightLog.date).getTime() >= new Date().setHours(0, 0, 0, 0);
-    if (isLatest || updatedHistory[updatedHistory.length - 1].date === newWeightLog.date) {
+    // 2. Update User Profile Current Weight 
+    // Logic: If date entered is today or future, OR if it is visually the latest entry in the sorted list
+    // Use string comparison for dates
+    const isLatestDate = newWeightLog.date >= today;
+    const lastHistoryDate = updatedHistory[updatedHistory.length - 1].date;
+
+    if (isLatestDate || lastHistoryDate === newWeightLog.date) {
       onUpdateUser({ ...user, weight: weightVal });
     }
 
@@ -204,28 +209,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     return acc;
   }, {} as Record<string, MealLog[]>);
 
-  const sortedDates = Object.keys(logsByDate).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-
-  // Data Filtering Helper
-  const filterDataByDays = (days: number) => {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
-    return cutoffStr;
-  };
+  const sortedDates = Object.keys(logsByDate).sort((a, b) => b.localeCompare(a));
 
   // Prepare Calorie Chart Data
+  const calorieCutoff = getSingaporePastDate(calorieRange);
   const calorieChartData = Object.entries(logsByDate)
-    .filter(([date]) => date >= filterDataByDays(calorieRange))
-    .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+    .filter(([date]) => date >= calorieCutoff)
+    .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, dayLogs]) => ({
       date: date.slice(5), // MM-DD
       cals: dayLogs.reduce((a, c) => a + c.calories, 0)
     }));
 
   // Prepare Weight Chart Data
+  const weightCutoff = getSingaporePastDate(weightRange);
   const weightChartData = weightHistory
-    .filter(w => w.date >= filterDataByDays(weightRange))
+    .filter(w => w.date >= weightCutoff)
     .map(w => ({
       date: w.date.slice(5),
       weight: w.weight
