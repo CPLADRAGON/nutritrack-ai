@@ -39,7 +39,7 @@ const profilePlanSchema = {
 
 export const analyzeFoodImage = async (base64Image: string): Promise<any> => {
   const ai = getAiClient();
-  
+
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -130,5 +130,37 @@ export const getDailyAdvice = async (profile: UserProfile, logs: MealLog[]): Pro
     return response.text || "Keep tracking to get better advice!";
   } catch (e) {
     return "Great job tracking your meals!";
+  }
+};
+
+export const getFoodSuggestion = async (
+  remaining: { calories: number; protein: number; carbs: number; fat: number },
+  goal: string
+): Promise<string> => {
+  const ai = getAiClient();
+
+  const prompt = `
+    I have the following macro allowance left for today:
+    Calories: ${remaining.calories} kcal
+    Protein: ${remaining.protein} g
+    Carbs: ${remaining.carbs} g
+    Fat: ${remaining.fat} g
+    
+    My overall goal is: ${goal}.
+
+    Based on these remaining numbers, suggest 2 or 3 specific, simple snack or meal options that fit within this budget. 
+    If the numbers are negative (meaning I overate), suggest something extremely light like tea or cucumber slices.
+    Keep the answer conversational, short, and appetizing. Max 50 words.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+    return response.text || "Try a light protein snack!";
+  } catch (e) {
+    console.error("Suggestion Error", e);
+    return "Could not generate suggestion right now.";
   }
 };

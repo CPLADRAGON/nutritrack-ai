@@ -10,8 +10,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
 
   // 2. Prioritize the Environment Variable from the System (GitHub Actions)
-  const apiKey = process.env.API_KEY || env.API_KEY;
-  const clientId = process.env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID;
+  const apiKey = process.env.API_KEY || env.API_KEY || '';
+  const clientId = process.env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID || '';
 
   return {
     plugins: [react()],
