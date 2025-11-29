@@ -290,14 +290,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const inputClass = "w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
 
-  // Helper for Card Styling
-  const getCardStyle = (current: number, target: number, baseColor: string, warningColor: string) => {
-    if (current > target) {
-      return `bg-${warningColor}-50 border-${warningColor}-200 ring-2 ring-${warningColor}-300 ring-opacity-50`;
-    }
-    return `bg-white border-gray-100 hover:shadow-md`;
-  };
-
   return (
     <div className="space-y-8 pb-20">
       {/* Top Stats Cards */}
