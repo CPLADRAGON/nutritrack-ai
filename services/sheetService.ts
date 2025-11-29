@@ -56,7 +56,7 @@ export class SheetService {
     this.spreadsheetId = result.spreadsheetId;
 
     // Initialize headers
-    await this.writeRange('Profile!A1:M1', [['ID', 'Name', 'Age', 'Gender', 'Height', 'Weight', 'Activity', 'Goal', 'TargetCals', 'TargetP', 'TargetC', 'TargetF', 'CreatedAt']]);
+    await this.writeRange('Profile!A1:N1', [['ID', 'Name', 'Age', 'Gender', 'Height', 'Weight', 'Activity', 'Goal', 'TargetCals', 'TargetP', 'TargetC', 'TargetF', 'CreatedAt', 'TDEE']]);
     await this.writeRange('Logs!A1:I1', [['ID', 'Date', 'Time', 'Type', 'Description', 'Calories', 'P', 'C', 'F']]);
     await this.writeRange('Weight!A1:B1', [['Date', 'Weight']]);
   }
@@ -76,7 +76,7 @@ export class SheetService {
     if (!this.spreadsheetId) throw new Error("Spreadsheet not initialized");
 
     // Batch get all sheets
-    const url = `${SHEETS_API_BASE}/${this.spreadsheetId}/values:batchGet?ranges=Profile!A2:M2&ranges=Logs!A2:I&ranges=Weight!A2:B`;
+    const url = `${SHEETS_API_BASE}/${this.spreadsheetId}/values:batchGet?ranges=Profile!A2:N2&ranges=Logs!A2:I&ranges=Weight!A2:B`;
     const result = await this.fetch(url);
 
     const profileRows = result.valueRanges[0].values;
@@ -99,7 +99,9 @@ export class SheetService {
         targetProtein: Number(row[9]),
         targetCarbs: Number(row[10]),
         targetFat: Number(row[11]),
-        createdAt: row[12]
+        createdAt: row[12],
+        // Default TDEE to target + 300 if missing (migration strategy) or just set to target
+        tdee: row[13] ? Number(row[13]) : Number(row[8])
       };
     }
 
@@ -128,9 +130,9 @@ export class SheetService {
     const row = [
       user.id, user.name, user.age, user.gender, user.height, user.weight,
       user.activityLevel, user.goal, user.targetCalories, user.targetProtein,
-      user.targetCarbs, user.targetFat, user.createdAt
+      user.targetCarbs, user.targetFat, user.createdAt, user.tdee
     ];
-    await this.writeRange('Profile!A2:M2', [row]);
+    await this.writeRange('Profile!A2:N2', [row]);
   }
 
   async saveLogs(logs: MealLog[]) {

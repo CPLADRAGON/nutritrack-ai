@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, MealLog, WeightLog, MealType } from '../types';
-import { analyzeFood, getDailyAdvice, getFoodSuggestion } from '../services/geminiService';
+import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -20,8 +20,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const [showLogModal, setShowLogModal] = useState(false);
   const [showGoalsModal, setShowGoalsModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
+  const [showTDEEModal, setShowTDEEModal] = useState(false);
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [isCalculatingTDEE, setIsCalculatingTDEE] = useState(false);
   const [aiAdvice, setAiAdvice] = useState<string>('');
 
   // Chart Range State
@@ -35,6 +38,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     carbs: user.targetCarbs,
     fat: user.targetFat
   });
+
+  // TDEE State
+  const [newTDEE, setNewTDEE] = useState<number>(user.tdee || 2000);
 
   // Log Analysis Inputs
   const [foodDescriptionInput, setFoodDescriptionInput] = useState('');
@@ -69,6 +75,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const totalCarbs = todayLogs.reduce((acc, curr) => acc + curr.carbs, 0);
   const totalFat = todayLogs.reduce((acc, curr) => acc + curr.fat, 0);
 
+  // Deficit Calculations
+  const userTDEE = user.tdee || user.targetCalories; // Fallback if old user
+  const todayDeficit = userTDEE - totalCalories;
+
+  // Calculate All-time Deficit
+  // 1. Group all logs by date
+  const allLogsByDate = logs.reduce((acc, log) => {
+    if (!acc[log.date]) acc[log.date] = 0;
+    acc[log.date] += log.calories;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // 2. Sum deficits (Only for days that have logs)
+  let totalDeficit = 0;
+  Object.values(allLogsByDate).forEach(dailyCals => {
+    totalDeficit += (userTDEE - dailyCals);
+  });
+
+
   useEffect(() => {
     getDailyAdvice(user, logs).then(setAiAdvice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,6 +116,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     } finally {
       setIsSuggesting(false);
     }
+  };
+
+  const handleCalculateTDEE = async () => {
+    setIsCalculatingTDEE(true);
+    try {
+      const plan = await generatePlanFromProfile(user);
+      setNewTDEE(plan.tdee);
+    } catch (e) {
+      alert("Could not calculate TDEE automatically.");
+    } finally {
+      setIsCalculatingTDEE(false);
+    }
+  };
+
+  const handleSaveTDEE = () => {
+    onUpdateUser({ ...user, tdee: Number(newTDEE) });
+    setShowTDEEModal(false);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -208,8 +250,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     onUpdateWeight(updatedHistory);
 
     // 2. Update User Profile Current Weight 
-    // Logic: If date entered is today or future, OR if it is visually the latest entry in the sorted list
-    // Use string comparison for dates
     const isLatestDate = newWeightLog.date >= today;
     const lastHistoryDate = updatedHistory[updatedHistory.length - 1].date;
 
@@ -250,6 +290,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const inputClass = "w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
 
+  // Helper for Card Styling
+  const getCardStyle = (current: number, target: number, baseColor: string, warningColor: string) => {
+    if (current > target) {
+      return `bg-${warningColor}-50 border-${warningColor}-200 ring-2 ring-${warningColor}-300 ring-opacity-50`;
+    }
+    return `bg-white border-gray-100 hover:shadow-md`;
+  };
+
   return (
     <div className="space-y-8 pb-20">
       {/* Top Stats Cards */}
@@ -261,56 +309,89 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-slideUp delay-75">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Calories Today</h3>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 animate-slideUp delay-75">
+        {/* Calories Card */}
+        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCalories > user.targetCalories ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
+          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCalories > user.targetCalories ? 'bg-red-100' : 'bg-emerald-100'}`}></div>
+          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-500'}`}>
+            Calories {totalCalories > user.targetCalories && '⚠️'}
+          </h3>
           <div className="flex items-end mt-3 relative z-10">
-            <span className={`text-3xl font-extrabold tracking-tight ${totalCalories > user.targetCalories ? 'text-red-500' : 'text-gray-900'}`}>
+            <span className={`text-3xl font-extrabold tracking-tight ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-900'}`}>
               {totalCalories}
             </span>
             <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCalories}</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalCalories / user.targetCalories) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className={`h-2 rounded-full transition-all duration-1000 ${totalCalories > user.targetCalories ? 'bg-red-500' : 'bg-gradient-to-r from-emerald-400 to-emerald-600'}`} style={{ width: `${Math.min((totalCalories / user.targetCalories) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-blue-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Protein</h3>
+        {/* Protein Card */}
+        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalProtein > user.targetProtein ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
+          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalProtein > user.targetProtein ? 'bg-red-100' : 'bg-blue-100'}`}></div>
+          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalProtein > user.targetProtein ? 'text-red-600' : 'text-gray-500'}`}>
+            Protein {totalProtein > user.targetProtein && '⚠️'}
+          </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalProtein}g</span>
             <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetProtein}g</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-400 to-blue-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalProtein / user.targetProtein) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className={`h-2 rounded-full transition-all duration-1000 ${totalProtein > user.targetProtein ? 'bg-red-500' : 'bg-gradient-to-r from-blue-400 to-blue-600'}`} style={{ width: `${Math.min((totalProtein / user.targetProtein) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-orange-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Carbs</h3>
+        {/* Carbs Card */}
+        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCarbs > user.targetCarbs ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
+          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCarbs > user.targetCarbs ? 'bg-red-100' : 'bg-orange-100'}`}></div>
+          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCarbs > user.targetCarbs ? 'text-red-600' : 'text-gray-500'}`}>
+            Carbs {totalCarbs > user.targetCarbs && '⚠️'}
+          </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalCarbs}g</span>
             <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCarbs}g</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className="bg-gradient-to-r from-orange-400 to-orange-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalCarbs / user.targetCarbs) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className={`h-2 rounded-full transition-all duration-1000 ${totalCarbs > user.targetCarbs ? 'bg-red-500' : 'bg-gradient-to-r from-orange-400 to-orange-600'}`} style={{ width: `${Math.min((totalCarbs / user.targetCarbs) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-purple-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Fat</h3>
+        {/* Fat Card */}
+        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalFat > user.targetFat ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
+          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalFat > user.targetFat ? 'bg-red-100' : 'bg-purple-100'}`}></div>
+          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalFat > user.targetFat ? 'text-red-600' : 'text-gray-500'}`}>
+            Fat {totalFat > user.targetFat && '⚠️'}
+          </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalFat}g</span>
             <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetFat}g</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-400 to-purple-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalFat / user.targetFat) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className={`h-2 rounded-full transition-all duration-1000 ${totalFat > user.targetFat ? 'bg-red-500' : 'bg-gradient-to-r from-purple-400 to-purple-600'}`} style={{ width: `${Math.min((totalFat / user.targetFat) * 100, 100)}%` }}></div>
           </div>
         </div>
+
+        {/* Deficit Card */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all flex flex-col justify-between">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-teal-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
+          <div>
+            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Calorie Deficit</h3>
+            <div className="mt-2 relative z-10">
+              <p className="text-xs text-gray-400 mb-0.5">Today</p>
+              <span className={`text-2xl font-extrabold tracking-tight ${todayDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>
+                {todayDeficit > 0 ? '+' : ''}{todayDeficit}
+              </span>
+            </div>
+          </div>
+          <div className="mt-2 relative z-10 border-t pt-2 border-gray-100">
+            <p className="text-xs text-gray-400 mb-0.5">Total All-Time</p>
+            <span className={`text-lg font-bold tracking-tight ${totalDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>
+              {totalDeficit > 0 ? '+' : ''}{totalDeficit}
+            </span>
+          </div>
+        </div>
+
       </div>
 
       {/* AI Advice Banner */}
@@ -405,6 +486,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               Weight Trend
             </h3>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowTDEEModal(true)}
+                className="text-xs bg-purple-50 text-purple-600 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition font-bold"
+                title="Update TDEE"
+              >
+                ⚡ TDEE
+              </button>
               <button
                 onClick={() => setShowWeightModal(true)}
                 className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold"
@@ -527,6 +615,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
           </table>
         </div>
       </div>
+
+      {/* TDEE Update Modal */}
+      {showTDEEModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowTDEEModal(false)}></div>
+            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full animate-scaleIn">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6 flex items-center gap-2">
+                  <span>⚡</span> Update TDEE
+                </h3>
+                <p className="text-sm text-gray-500 mb-4">Total Daily Energy Expenditure is the number of calories you burn daily. This acts as your maintenance baseline.</p>
+
+                <div className="space-y-4">
+                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex flex-col gap-2">
+                    <label className="block text-sm font-bold text-purple-900">Calculated TDEE (kcal)</label>
+                    <input
+                      type="number"
+                      className="w-full bg-white border border-purple-200 rounded-lg p-3 text-lg font-bold text-purple-900 text-center focus:ring-2 focus:ring-purple-500 outline-none"
+                      value={newTDEE}
+                      onChange={e => setNewTDEE(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleCalculateTDEE}
+                    disabled={isCalculatingTDEE}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none transition-colors"
+                  >
+                    {isCalculatingTDEE ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-purple-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Recalculate with AI
+                      </>
+                    ) : (
+                      <>
+                        <span>✨</span> Recalculate based on Profile
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button type="button" onClick={handleSaveTDEE} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
+                  Update TDEE
+                </button>
+                <button type="button" onClick={() => setShowTDEEModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Goals Modal */}
       {showGoalsModal && (

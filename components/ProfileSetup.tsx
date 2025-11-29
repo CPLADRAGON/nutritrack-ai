@@ -36,6 +36,7 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
         weight: Number(formData.weight),
         activityLevel: formData.activityLevel,
         goal: formData.goal,
+        tdee: plan.tdee, // Save TDEE
         targetCalories: plan.targetCalories,
         targetProtein: plan.targetProtein,
         targetCarbs: plan.targetCarbs,

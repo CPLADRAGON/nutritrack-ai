@@ -28,13 +28,14 @@ const foodAnalysisSchema = {
 const profilePlanSchema = {
   type: Type.OBJECT,
   properties: {
+    tdee: { type: Type.NUMBER, description: "Total Daily Energy Expenditure (Maintenance Calories)" },
     targetCalories: { type: Type.NUMBER },
     targetProtein: { type: Type.NUMBER },
     targetCarbs: { type: Type.NUMBER },
     targetFat: { type: Type.NUMBER },
     advice: { type: Type.STRING, description: "Brief advice based on body data" }
   },
-  required: ["targetCalories", "targetProtein", "targetCarbs", "targetFat", "advice"]
+  required: ["tdee", "targetCalories", "targetProtein", "targetCarbs", "targetFat", "advice"]
 };
 
 export const analyzeFood = async (base64Image: string | null, textDescription: string): Promise<any> => {
@@ -99,8 +100,10 @@ export const generatePlanFromProfile = async (profile: Partial<UserProfile>): Pr
     Activity Level: ${profile.activityLevel}
     Goal: ${profile.goal}
 
-    Calculate the daily caloric needs (TDEE) and recommended macronutrient split (Protein/Carbs/Fat) for this user to achieve their goal.
-    Return JSON with targets and a short advice paragraph.
+    1. Calculate the user's TDEE (Maintenance Calories).
+    2. Calculate the daily caloric target based on their goal (e.g. deficit for weight loss).
+    3. Calculate recommended macronutrient split (Protein/Carbs/Fat).
+    Return JSON with TDEE, targets and a short advice paragraph.
   `;
 
   try {

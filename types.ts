@@ -27,6 +27,7 @@ export interface UserProfile {
   weight: number; // kg
   activityLevel: ActivityLevel;
   goal: GoalType;
+  tdee: number; // Total Daily Energy Expenditure (Maintenance Calories)
   targetCalories: number;
   targetProtein: number;
   targetCarbs: number;
