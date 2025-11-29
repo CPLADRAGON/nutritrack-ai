@@ -1,18 +1,27 @@
 # 🥗 NutriTrack AI
 
-**NutriTrack AI** is a serverless, privacy-focused personal nutrition assistant. It uses **Google Gemini** to analyze food photos for calorie/macro estimation and stores all your data securely in your own **Google Sheets** via your Google Drive.
+**NutriTrack AI** is a serverless, privacy-focused personal nutrition assistant. It uses **Google Gemini** to analyze food photos or descriptions, tracks your macros against your goals, and stores all your data securely in your own **Google Sheets** via your Google Drive.
 
 > **Zero Cost**: This project is designed to run entirely on free tiers (GitHub Pages + Gemini Free Tier + Google Sheets API).
 
 ## ✨ Features
 
-*   **AI Food Analysis**: Upload a photo of your meal, and Gemini estimates calories, protein, carbs, and fat.
-*   **Personalized Plans**: Enter your body metrics (height, weight, age, goal), and the AI calculates your optimal daily targets (TDEE).
-*   **Google Sheets Database**: No 3rd party database. Your data lives in a spreadsheet in *your* Google Drive.
-*   **Progress Tracking**:
-    *   Interactive charts for Calorie Intake and Weight History.
-    *   Adjustable time ranges (7, 30, 90 days).
-*   **Daily Insights**: AI-generated advice based on your recent logs.
+### 🧠 AI Intelligence
+*   **Smart Food Analysis**: Upload a photo 📸 OR describe your meal in text 📝 (e.g., "Chicken rice with extra egg"). Gemini estimates calories, protein, carbs, and fat.
+*   **"What should I eat?"**: Get instant, context-aware snack or meal suggestions based on your remaining macros for the day.
+*   **TDEE Calculator**: Automatically calculates your Total Daily Energy Expenditure (Maintenance Calories) based on your profile and activity level.
+*   **Daily Insights**: AI-generated advice banner that adapts to your recent eating habits.
+
+### 📊 Data & Tracking
+*   **Google Sheets Database**: No 3rd party database. Your data lives in a spreadsheet (`NutriTrack AI Data`) in *your* Google Drive.
+*   **Calorie Deficit Monitor**: Real-time tracking of your daily and all-time calorie deficit to keep you on track for weight loss.
+*   **Macro Tracking**: Visual progress rings for Calories, Protein, Carbs, and Fat with warning indicators ⚠️ if you exceed targets.
+*   **Weight Trend**: Interactive line chart to visualize weight changes over time.
+*   **Timezone Smart**: Automatically handles dates and times based on Singapore Time (UTC+8) to ensure consistent daily logging.
+
+### 🎨 Modern UI
+*   **Glassmorphism Design**: Beautiful, modern interface with backdrop blurs and smooth animations.
+*   **Interactive Charts**: Switch between 7, 30, and 90-day views for Calorie and Weight history.
 *   **PWA-Ready**: Responsive design works great on mobile and desktop.
 
 ## 🚀 Live Demo
@@ -112,14 +121,14 @@ This project uses **GitHub Actions** to automatically build and deploy.
 ## 🏗️ Tech Stack
 
 *   **Frontend**: React 18, TypeScript, Vite
-*   **Styling**: Tailwind CSS
+*   **Styling**: Tailwind CSS, Glassmorphism
 *   **Charts**: Recharts
 *   **AI**: Google Gemini SDK (`@google/genai`)
-*   **Storage**: Google Sheets API v4
+*   **Storage**: Google Sheets API v4 (via Identity Services)
 
 ## 🔒 Privacy
 
 This application is **serverless**. It runs entirely in your browser.
 *   **Authentication**: Handled directly by Google.
 *   **Data**: Stored in *your* Google Drive. The developer of this app has no access to your data.
-*   **AI**: Images are sent to Google Gemini for analysis but are not stored by the application.
+*   **AI**: Images/Text are sent to Google Gemini for analysis but are not stored by the application logic (only the results are saved to your Sheet).
