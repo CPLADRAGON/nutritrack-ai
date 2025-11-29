@@ -37,29 +37,44 @@ const profilePlanSchema = {
   required: ["targetCalories", "targetProtein", "targetCarbs", "targetFat", "advice"]
 };
 
-export const analyzeFoodImage = async (base64Image: string): Promise<any> => {
+export const analyzeFood = async (base64Image: string | null, textDescription: string): Promise<any> => {
   const ai = getAiClient();
 
   try {
+    const parts: any[] = [];
+
+    // Add Image if present
+    if (base64Image) {
+      parts.push({
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: base64Image
+        }
+      });
+    }
+
+    // Construct prompt based on available inputs
+    let promptText = "Analyze the food inputs. Identify the food, estimate the portion size, and provide the nutritional content (Calories, Protein, Carbs, Fat). Be realistic. If it's a combo meal, sum them up.";
+
+    if (textDescription) {
+      promptText += `\nUser Description: "${textDescription}". Use this description to aid identification or estimation.`;
+    }
+
+    if (!base64Image && !textDescription) {
+      throw new Error("Please provide an image or a description.");
+    }
+
+    parts.push({ text: promptText });
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: "image/jpeg",
-              data: base64Image
-            }
-          },
-          {
-            text: "Analyze this food image. Identify the food, estimate the portion size, and provide the nutritional content (Calories, Protein, Carbs, Fat). Be realistic. If it's a combo meal, sum them up."
-          }
-        ]
+        parts: parts
       },
       config: {
         responseMimeType: "application/json",
         responseSchema: foodAnalysisSchema,
-        systemInstruction: "You are an expert nutritionist and dietitian. You are analyzing photos of food to help a user track their daily intake."
+        systemInstruction: "You are an expert nutritionist and dietitian. You are analyzing photos or descriptions of food to help a user track their daily intake."
       }
     });
 

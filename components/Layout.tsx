@@ -8,19 +8,22 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children, userName, onLogout }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
-      <header className="bg-white shadow-sm sticky top-0 z-10">
+    <div className="min-h-screen flex flex-col bg-gray-50 font-['Inter']">
+      <header className="bg-white/95 backdrop-blur-md shadow-sm fixed top-0 w-full z-50 border-b border-gray-100 transition-all duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
-          <div className="flex items-center">
-            <span className="text-2xl mr-2">🥗</span>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">NutriTrack AI</h1>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl filter drop-shadow-sm">🥗</span>
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">NutriTrack AI</h1>
           </div>
           {userName && (
             <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500 hidden sm:inline">Hi, {userName}</span>
-              <button 
+              <div className="hidden sm:flex flex-col items-end mr-2">
+                <span className="text-xs text-gray-400 font-medium">Signed in as</span>
+                <span className="text-sm text-gray-700 font-semibold">{userName}</span>
+              </div>
+              <button
                 onClick={onLogout}
-                className="text-sm text-red-600 hover:text-red-800 font-medium"
+                className="text-sm bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-full font-medium transition-colors"
               >
                 Exit
               </button>
@@ -28,12 +31,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, userName, onLogout }) 
           )}
         </div>
       </header>
-      <main className="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Added pt-20 to account for fixed header height */}
+      <main className="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pt-24 animate-fadeIn">
         {children}
       </main>
-      <footer className="bg-white border-t mt-12">
-        <div className="max-w-7xl mx-auto py-6 px-4 text-center text-gray-400 text-sm">
-          <p>© 2025 NutriTrack AI. Powered by Google Gemini.</p>
+      <footer className="bg-white border-t mt-12 py-8">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p className="text-gray-400 text-sm">© 2025 NutriTrack AI. Powered by Google Gemini.</p>
         </div>
       </footer>
     </div>

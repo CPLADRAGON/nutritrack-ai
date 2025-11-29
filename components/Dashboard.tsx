@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, MealLog, WeightLog, MealType } from '../types';
-import { analyzeFoodImage, getDailyAdvice, getFoodSuggestion } from '../services/geminiService';
+import { analyzeFood, getDailyAdvice, getFoodSuggestion } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -35,6 +35,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     carbs: user.targetCarbs,
     fat: user.targetFat
   });
+
+  // Log Analysis Inputs
+  const [foodDescriptionInput, setFoodDescriptionInput] = useState('');
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   // New Log State (Defaults to Singapore Time)
   const [newLog, setNewLog] = useState<Partial<MealLog>>({
@@ -89,34 +93,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelectedImage(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAnalyze = async () => {
+    if (!selectedImage && !foodDescriptionInput.trim()) {
+      alert("Please provide either a photo or a text description.");
+      return;
+    }
 
     setIsAnalyzing(true);
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        try {
-          const result = await analyzeFoodImage(base64String);
-          setNewLog(prev => ({
-            ...prev,
-            description: result.foodName,
-            calories: result.calories,
-            protein: result.protein,
-            carbs: result.carbs,
-            fat: result.fat,
-            imageUrl: reader.result as string
-          }));
-        } catch (err) {
-          alert("Failed to analyze image. Please try again manually.");
-        } finally {
-          setIsAnalyzing(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
+      // Strip header from base64 if present
+      const base64Data = selectedImage ? selectedImage.split(',')[1] : null;
+
+      const result = await analyzeFood(base64Data, foodDescriptionInput);
+
+      setNewLog(prev => ({
+        ...prev,
+        description: result.foodName,
+        calories: result.calories,
+        protein: result.protein,
+        carbs: result.carbs,
+        fat: result.fat,
+        imageUrl: selectedImage || undefined
+      }));
+    } catch (err) {
+      console.error(err);
+      alert("Failed to analyze. Please try again or enter details manually.");
+    } finally {
       setIsAnalyzing(false);
     }
   };
@@ -139,8 +151,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     const updatedLogs = [log, ...logs];
     onUpdateLogs(updatedLogs);
 
+    closeLogModal();
+  };
+
+  const closeLogModal = () => {
     setShowLogModal(false);
-    // Reset form to Singapore defaults
+    // Reset form
     setNewLog({
       date: getSingaporeDate(),
       time: getSingaporeTime(),
@@ -152,6 +168,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       fat: 0,
       imageUrl: undefined
     });
+    setSelectedImage(null);
+    setFoodDescriptionInput('');
   };
 
   const deleteLog = (id: string) => {
@@ -218,7 +236,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, dayLogs]) => ({
       date: date.slice(5), // MM-DD
-      cals: dayLogs.reduce((a, c) => a + c.calories, 0)
+      cals: (dayLogs as MealLog[]).reduce((a, c) => a + c.calories, 0)
     }));
 
   // Prepare Weight Chart Data
@@ -230,88 +248,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       weight: w.weight
     }));
 
-  const inputClass = "w-full border border-gray-300 rounded p-2 text-sm bg-white text-gray-900 focus:ring-primary focus:border-primary";
+  const inputClass = "w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-20">
       {/* Top Stats Cards */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center animate-slideUp">
         <h2 className="text-xl font-bold text-gray-800">Daily Summary</h2>
-        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-medium flex items-center">
+        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-medium flex items-center bg-emerald-50 px-3 py-1.5 rounded-full transition-colors">
           <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
           Edit Goals
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-slideUp delay-75">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
           <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-sm font-medium uppercase relative z-10">Calories Today</h3>
-          <div className="flex items-end mt-2 relative z-10">
-            <span className={`text-3xl font-bold ${totalCalories > user.targetCalories ? 'text-red-500' : 'text-gray-900'}`}>
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Calories Today</h3>
+          <div className="flex items-end mt-3 relative z-10">
+            <span className={`text-3xl font-extrabold tracking-tight ${totalCalories > user.targetCalories ? 'text-red-500' : 'text-gray-900'}`}>
               {totalCalories}
             </span>
-            <span className="text-gray-400 text-sm ml-2 mb-1">/ {user.targetCalories}</span>
+            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCalories}</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2.5 mt-4 relative z-10">
-            <div className="bg-primary h-2.5 rounded-full" style={{ width: `${Math.min((totalCalories / user.targetCalories) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalCalories / user.targetCalories) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
           <div className="absolute top-0 right-0 w-24 h-24 bg-blue-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-sm font-medium uppercase relative z-10">Protein</h3>
-          <div className="flex items-end mt-2 relative z-10">
-            <span className="text-3xl font-bold text-gray-900">{totalProtein}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1">/ {user.targetProtein}g</span>
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Protein</h3>
+          <div className="flex items-end mt-3 relative z-10">
+            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalProtein}g</span>
+            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetProtein}g</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10">
-            <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min((totalProtein / user.targetProtein) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-400 to-blue-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalProtein / user.targetProtein) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
           <div className="absolute top-0 right-0 w-24 h-24 bg-orange-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-sm font-medium uppercase relative z-10">Carbs</h3>
-          <div className="flex items-end mt-2 relative z-10">
-            <span className="text-3xl font-bold text-gray-900">{totalCarbs}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1">/ {user.targetCarbs}g</span>
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Carbs</h3>
+          <div className="flex items-end mt-3 relative z-10">
+            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalCarbs}g</span>
+            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCarbs}g</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10">
-            <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${Math.min((totalCarbs / user.targetCarbs) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-400 to-orange-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalCarbs / user.targetCarbs) * 100, 100)}%` }}></div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all">
           <div className="absolute top-0 right-0 w-24 h-24 bg-purple-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <h3 className="text-gray-500 text-sm font-medium uppercase relative z-10">Fat</h3>
-          <div className="flex items-end mt-2 relative z-10">
-            <span className="text-3xl font-bold text-gray-900">{totalFat}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1">/ {user.targetFat}g</span>
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Fat</h3>
+          <div className="flex items-end mt-3 relative z-10">
+            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalFat}g</span>
+            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetFat}g</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10">
-            <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${Math.min((totalFat / user.targetFat) * 100, 100)}%` }}></div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-400 to-purple-600 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min((totalFat / user.targetFat) * 100, 100)}%` }}></div>
           </div>
         </div>
       </div>
 
       {/* AI Advice Banner */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 p-6 rounded-xl flex flex-col sm:flex-row items-start sm:items-center gap-4 shadow-sm">
-        <div className="flex-shrink-0 bg-white p-3 rounded-full shadow-sm text-2xl">
+      <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 p-6 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center gap-5 shadow-sm hover:shadow-md transition-shadow animate-fadeIn delay-100">
+        <div className="flex-shrink-0 bg-white p-3 rounded-full shadow-sm text-3xl">
           🤖
         </div>
         <div className="flex-grow">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-bold text-blue-900">AI Nutritionist Insights</h4>
-            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">Beta</span>
+          <div className="flex items-center gap-2 mb-2">
+            <h4 className="font-bold text-indigo-900">AI Nutritionist Insights</h4>
+            <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wide">Beta</span>
           </div>
-          <p className="text-blue-800 text-sm leading-relaxed">{aiAdvice || "Analyzing your patterns..."}</p>
+          <p className="text-indigo-800 text-sm leading-relaxed">{aiAdvice || "Analyzing your patterns..."}</p>
         </div>
         <div className="flex-shrink-0 mt-2 sm:mt-0">
           <button
             onClick={handleGetSuggestion}
             disabled={isSuggesting}
-            className="group relative flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-full text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-75 disabled:cursor-not-allowed"
+            className="group relative flex items-center justify-center px-5 py-2.5 border border-transparent text-sm font-semibold rounded-full text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed active:scale-95"
           >
             {isSuggesting ? (
               <>
@@ -323,8 +341,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               </>
             ) : (
               <>
-                <span className="mr-2">🍎</span>
-                What should I eat?
+                <span className="mr-2 text-lg">🍽️</span>
+                What to eat?
               </>
             )}
           </button>
@@ -332,37 +350,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-slideUp delay-200">
 
         {/* Calorie History Chart */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <span className="w-2 h-6 bg-emerald-500 rounded-full"></span>
+              <span className="w-2.5 h-6 bg-emerald-500 rounded-full"></span>
               Calorie Intake
             </h3>
             <select
               value={calorieRange}
               onChange={(e) => setCalorieRange(Number(e.target.value))}
-              className="text-xs border-gray-200 rounded-lg border p-1.5 bg-gray-50 text-gray-700 focus:ring-emerald-500 focus:border-emerald-500"
+              className="text-xs border-gray-200 rounded-lg border p-2 bg-gray-50 text-gray-700 focus:ring-emerald-500 focus:border-emerald-500 outline-none cursor-pointer hover:bg-gray-100 transition"
             >
               <option value={7}>Last 7 Days</option>
               <option value={30}>Last 30 Days</option>
               <option value={90}>Last 3 Months</option>
             </select>
           </div>
-          <div className="h-64">
+          <div className="h-64 w-full">
             {calorieChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={calorieChartData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                  <XAxis dataKey="date" fontSize={11} tickMargin={8} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
+                  <XAxis dataKey="date" fontSize={11} tickMargin={10} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
                   <YAxis fontSize={11} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
                   <RechartsTooltip
                     cursor={{ fill: '#f9fafb' }}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '12px' }}
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)', padding: '16px', fontFamily: 'Inter' }}
+                    itemStyle={{ color: '#374151', fontWeight: 600 }}
+                    labelStyle={{ color: '#9ca3af', marginBottom: '8px', fontSize: '12px' }}
                   />
-                  <Bar dataKey="cals" fill="url(#colorCals)" radius={[6, 6, 0, 0]} name="Calories" barSize={32} />
+                  <Bar dataKey="cals" fill="url(#colorCals)" radius={[6, 6, 0, 0]} name="Calories" barSize={24} />
                   <defs>
                     <linearGradient id="colorCals" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#10b981" stopOpacity={0.8} />
@@ -372,29 +392,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm">No data for selected range</div>
+              <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50 rounded-xl border border-dashed border-gray-200">No data for selected range</div>
             )}
           </div>
         </div>
 
         {/* Weight Trend Chart */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <span className="w-2 h-6 bg-blue-500 rounded-full"></span>
+              <span className="w-2.5 h-6 bg-blue-500 rounded-full"></span>
               Weight Trend
             </h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowWeightModal(true)}
-                className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition font-medium"
+                className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold"
               >
-                + Log Weight
+                + Log
               </button>
               <select
                 value={weightRange}
                 onChange={(e) => setWeightRange(Number(e.target.value))}
-                className="text-xs border-gray-200 rounded-lg border p-1.5 bg-gray-50 text-gray-700 focus:ring-blue-500 focus:border-blue-500"
+                className="text-xs border-gray-200 rounded-lg border p-2 bg-gray-50 text-gray-700 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer hover:bg-gray-100 transition"
               >
                 <option value={7}>Last 7 Days</option>
                 <option value={30}>Last 30 Days</option>
@@ -402,19 +422,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               </select>
             </div>
           </div>
-          <div className="h-64">
+          <div className="h-64 w-full">
             {weightChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={weightChartData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                  <XAxis dataKey="date" fontSize={11} tickMargin={8} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
+                  <XAxis dataKey="date" fontSize={11} tickMargin={10} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
                   <YAxis domain={['auto', 'auto']} fontSize={11} axisLine={false} tickLine={false} tick={{ fill: '#9ca3af' }} />
-                  <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '12px' }} />
-                  <Line type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} name="Weight (kg)" />
+                  <RechartsTooltip
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)', padding: '16px', fontFamily: 'Inter' }}
+                    itemStyle={{ color: '#374151', fontWeight: 600 }}
+                    labelStyle={{ color: '#9ca3af', marginBottom: '8px', fontSize: '12px' }}
+                  />
+                  <Line type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }} name="Weight (kg)" />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+              <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50 rounded-xl border border-dashed border-gray-200">
                 {weightHistory.length === 0 ? "No weight history yet" : "No data for selected range"}
               </div>
             )}
@@ -423,36 +447,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       </div>
 
       {/* Main Action Button */}
-      <div className="fixed bottom-8 right-8 z-20">
+      <div className="fixed bottom-8 right-8 z-40">
         <button
           onClick={() => setShowLogModal(true)}
-          className="bg-primary hover:bg-emerald-600 text-white rounded-full p-4 shadow-xl shadow-emerald-200 flex items-center justify-center transition-all transform hover:scale-105 hover:-translate-y-1 active:scale-95"
+          className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-full p-4 shadow-xl shadow-emerald-200/50 flex items-center justify-center transition-all transform hover:scale-110 hover:-translate-y-1 active:scale-95 group"
         >
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+          <svg className="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
         </button>
       </div>
 
       {/* Daily Logs List */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-100">
-          <h3 className="font-bold text-xl text-gray-900">Daily Journal</h3>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-slideUp delay-300">
+        <div className="p-6 border-b border-gray-50 bg-gray-50/50">
+          <h3 className="font-bold text-lg text-gray-900">Daily Journal</h3>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-100">
+            <thead className="bg-white">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Meal</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Food Item</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Calories</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">P (g)</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">C (g)</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">F (g)</th>
-                <th className="px-6 py-3"></th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Meal</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Food Item</th>
+                <th className="px-6 py-4 text-right text-xs font-bold text-gray-400 uppercase tracking-wider">Calories</th>
+                <th className="px-6 py-4 text-right text-xs font-bold text-gray-400 uppercase tracking-wider">P (g)</th>
+                <th className="px-6 py-4 text-right text-xs font-bold text-gray-400 uppercase tracking-wider">C (g)</th>
+                <th className="px-6 py-4 text-right text-xs font-bold text-gray-400 uppercase tracking-wider">F (g)</th>
+                <th className="px-6 py-4"></th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white divide-y divide-gray-50">
               {sortedDates.map(date => {
                 const dayLogs = logsByDate[date].sort((a, b) => a.time.localeCompare(b.time));
                 const dayTotalCals = dayLogs.reduce((a, c) => a + c.calories, 0);
@@ -463,24 +487,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 return (
                   <React.Fragment key={date}>
                     {dayLogs.map((log, idx) => (
-                      <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{idx === 0 ? date : ''}</td>
+                      <tr key={log.id} className="hover:bg-gray-50/80 transition-colors group">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">{idx === 0 ? date : ''}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-700">
                             {log.type === MealType.BREAKFAST && '🍳'}
                             {log.type === MealType.LUNCH && '🍱'}
                             {log.type === MealType.DINNER && '🍽️'}
                             {log.type === MealType.SNACK && '🥜'}
-                            <span className="ml-1">{log.type}</span>
+                            <span className="ml-2">{log.type}</span>
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-700 max-w-xs truncate" title={log.description}>{log.description}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium text-right">{log.calories}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700 max-w-xs truncate font-medium" title={log.description}>{log.description}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-bold text-right">{log.calories}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{log.protein}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{log.carbs}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{log.fat}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button onClick={() => deleteLog(log.id)} className="text-gray-400 hover:text-red-600 transition-colors">
+                          <button onClick={() => deleteLog(log.id)} className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
@@ -488,8 +512,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                         </td>
                       </tr>
                     ))}
-                    <tr className="bg-gray-50 font-bold border-t-2 border-gray-100">
-                      <td colSpan={3} className="px-6 py-3 text-right text-xs uppercase text-gray-500 tracking-wider">Daily Total</td>
+                    <tr className="bg-gray-50/50 font-bold border-t border-gray-100">
+                      <td colSpan={3} className="px-6 py-3 text-right text-xs uppercase text-gray-400 tracking-wider">Daily Total</td>
                       <td className="px-6 py-3 text-right text-sm text-gray-900">{dayTotalCals}</td>
                       <td className="px-6 py-3 text-right text-sm text-gray-900">{dayTotalP}</td>
                       <td className="px-6 py-3 text-right text-sm text-gray-900">{dayTotalC}</td>
@@ -508,10 +532,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       {showGoalsModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-900 bg-opacity-50 transition-opacity backdrop-blur-sm" onClick={() => setShowGoalsModal(false)}></div>
-            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full">
+            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowGoalsModal(false)}></div>
+            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full animate-scaleIn">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <h3 className="text-lg leading-6 font-bold text-gray-900 mb-4">Adjust Nutrition Goals</h3>
+                <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6">Adjust Nutrition Goals</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Daily Calories (kcal)</label>
@@ -534,10 +558,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 </div>
               </div>
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button type="button" onClick={handleUpdateGoals} className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={handleUpdateGoals} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Update Goals
                 </button>
-                <button type="button" onClick={() => setShowGoalsModal(false)} className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={() => setShowGoalsModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Cancel
                 </button>
               </div>
@@ -550,10 +574,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       {showWeightModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-900 bg-opacity-50 transition-opacity backdrop-blur-sm" onClick={() => setShowWeightModal(false)}></div>
-            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-sm w-full">
+            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowWeightModal(false)}></div>
+            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-sm w-full animate-scaleIn">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <h3 className="text-lg leading-6 font-bold text-gray-900 mb-4">Log Current Weight</h3>
+                <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6">Log Current Weight</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -561,15 +585,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Weight (kg)</label>
-                    <input type="number" step="0.1" className={inputClass} value={newWeightLog.weight} onChange={e => setNewWeightLog({ ...newWeightLog, weight: Number(e.target.value) })} />
+                    <div className="relative">
+                      <input type="number" step="0.1" className={inputClass} value={newWeightLog.weight} onChange={e => setNewWeightLog({ ...newWeightLog, weight: Number(e.target.value) })} />
+                      <span className="absolute right-3 top-2.5 text-gray-400 text-sm">kg</span>
+                    </div>
                   </div>
                 </div>
               </div>
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button type="button" onClick={handleSaveWeight} className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={handleSaveWeight} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Save Weight
                 </button>
-                <button type="button" onClick={() => setShowWeightModal(false)} className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={() => setShowWeightModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Cancel
                 </button>
               </div>
@@ -582,85 +609,103 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       {showLogModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-900 bg-opacity-50 transition-opacity backdrop-blur-sm" onClick={() => setShowLogModal(false)}></div>
+            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={closeLogModal}></div>
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg w-full">
+            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg w-full animate-scaleIn">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg leading-6 font-bold text-gray-900" id="modal-title">Log Meal</h3>
-                  <button onClick={() => setShowLogModal(false)} className="text-gray-400 hover:text-gray-600">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl leading-6 font-bold text-gray-900" id="modal-title">Log Meal</h3>
+                  <button onClick={closeLogModal} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition">
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
 
-                {/* Image Upload */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">1. Analyze Photo (AI)</label>
-                  <div className="flex items-center justify-center w-full">
-                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer hover:bg-gray-50 transition-colors ${isAnalyzing ? 'bg-gray-100 border-gray-400' : 'border-gray-300'}`}>
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                {/* AI Analysis Section */}
+                <div className="mb-8 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100">
+                  <label className="block text-sm font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                    <span>✨</span> AI Smart Analysis
+                  </label>
+
+                  <div className="space-y-3">
+                    <textarea
+                      className="w-full border border-indigo-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 min-h-[80px]"
+                      placeholder="Describe your food (e.g. 'A bowl of beef noodles with extra egg')"
+                      value={foodDescriptionInput}
+                      onChange={(e) => setFoodDescriptionInput(e.target.value)}
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex-1 cursor-pointer group">
+                        <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileSelect} />
+                        <div className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed transition-all ${selectedImage ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:border-gray-400'}`}>
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          <span className="text-sm font-medium">{selectedImage ? 'Photo Selected' : 'Upload Photo (Optional)'}</span>
+                        </div>
+                      </label>
+
+                      <button
+                        onClick={handleAnalyze}
+                        disabled={isAnalyzing || (!selectedImage && !foodDescriptionInput)}
+                        className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-200 transition-all flex items-center gap-2"
+                      >
                         {isAnalyzing ? (
-                          <div className="flex flex-col items-center">
-                            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
-                            <p className="text-sm text-gray-500">Analyzing food...</p>
-                          </div>
-                        ) : (
                           <>
-                            <svg className="w-8 h-8 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" /></svg>
-                            <p className="text-xs text-gray-500 font-medium">Click to upload food photo</p>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Analyzing...
                           </>
+                        ) : (
+                          <>Analyze</>
                         )}
-                      </div>
-                      <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={isAnalyzing} />
-                    </label>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
                 {/* Manual Entry Form */}
-                <div className="space-y-4">
-                  <p className="text-sm font-medium text-gray-700">2. Review & Edit Details</p>
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-5">
+                  <p className="text-sm font-bold text-gray-700 border-b pb-2">Review & Save</p>
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Date</label>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Date</label>
                       <input type="date" className={inputClass} value={newLog.date} onChange={e => setNewLog({ ...newLog, date: e.target.value })} />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Type</label>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Type</label>
                       <select className={inputClass} value={newLog.type} onChange={e => setNewLog({ ...newLog, type: e.target.value as MealType })}>
                         {Object.values(MealType).map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Description</label>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Description</label>
                     <input type="text" placeholder="e.g. Chicken Rice" className={inputClass} value={newLog.description} onChange={e => setNewLog({ ...newLog, description: e.target.value })} />
                   </div>
 
-                  <div className="grid grid-cols-4 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Cals</label>
-                      <input type="number" className={inputClass} value={newLog.calories} onChange={e => setNewLog({ ...newLog, calories: Number(e.target.value) })} />
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                      <label className="block text-xs font-bold text-emerald-700 mb-1 text-center">Cals</label>
+                      <input type="number" className="w-full bg-white border border-emerald-200 rounded text-center text-sm p-1 text-emerald-900 font-bold" value={newLog.calories} onChange={e => setNewLog({ ...newLog, calories: Number(e.target.value) })} />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Pro</label>
-                      <input type="number" className={inputClass} value={newLog.protein} onChange={e => setNewLog({ ...newLog, protein: Number(e.target.value) })} />
+                    <div className="bg-blue-50 p-2 rounded-lg border border-blue-100">
+                      <label className="block text-xs font-bold text-blue-700 mb-1 text-center">Pro</label>
+                      <input type="number" className="w-full bg-white border border-blue-200 rounded text-center text-sm p-1 text-blue-900" value={newLog.protein} onChange={e => setNewLog({ ...newLog, protein: Number(e.target.value) })} />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Carb</label>
-                      <input type="number" className={inputClass} value={newLog.carbs} onChange={e => setNewLog({ ...newLog, carbs: Number(e.target.value) })} />
+                    <div className="bg-orange-50 p-2 rounded-lg border border-orange-100">
+                      <label className="block text-xs font-bold text-orange-700 mb-1 text-center">Carb</label>
+                      <input type="number" className="w-full bg-white border border-orange-200 rounded text-center text-sm p-1 text-orange-900" value={newLog.carbs} onChange={e => setNewLog({ ...newLog, carbs: Number(e.target.value) })} />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Fat</label>
-                      <input type="number" className={inputClass} value={newLog.fat} onChange={e => setNewLog({ ...newLog, fat: Number(e.target.value) })} />
+                    <div className="bg-purple-50 p-2 rounded-lg border border-purple-100">
+                      <label className="block text-xs font-bold text-purple-700 mb-1 text-center">Fat</label>
+                      <input type="number" className="w-full bg-white border border-purple-200 rounded text-center text-sm p-1 text-purple-900" value={newLog.fat} onChange={e => setNewLog({ ...newLog, fat: Number(e.target.value) })} />
                     </div>
                   </div>
                 </div>
               </div>
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button type="button" onClick={handleSaveLog} className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={handleSaveLog} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-emerald-500 text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Save Meal
                 </button>
-                <button type="button" onClick={() => setShowLogModal(false)} className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                <button type="button" onClick={closeLogModal} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Cancel
                 </button>
               </div>
