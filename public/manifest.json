@@ -1,0 +1,22 @@
+{
+    "name": "NutriTrack AI",
+    "short_name": "NutriTrack",
+    "start_url": "./",
+    "display": "standalone",
+    "background_color": "#f9fafb",
+    "theme_color": "#10b981",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        },
+        {
+            "src": "icon.svg",
+            "sizes": "512x512",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}
