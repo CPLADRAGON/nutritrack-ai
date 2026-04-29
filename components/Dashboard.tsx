@@ -34,6 +34,53 @@ interface DashboardProps {
   onUpdateWeight: (history: WeightLog[]) => void;
 }
 
+const renderInlineMarkdown = (text: string, keyPrefix: string) => {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-strong-${index}`} className="font-bold text-slate-950">{part.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={`${keyPrefix}-text-${index}`}>{part}</React.Fragment>;
+  });
+};
+
+const FormattedAiAdvice: React.FC<{ text: string }> = ({ text }) => {
+  const normalized = text.trim().replace(/\s+(\d+\.\s)/g, '\n$1');
+  const lines = normalized.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const blocks: React.ReactNode[] = [];
+  let listItems: React.ReactNode[] = [];
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      blocks.push(
+        <ol key={`list-${blocks.length}`} className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
+          {listItems}
+        </ol>
+      );
+      listItems = [];
+    }
+  };
+
+  lines.forEach((line, index) => {
+    const numbered = line.match(/^\d+\.\s+(.+)$/);
+    if (numbered) {
+      listItems.push(
+        <li key={`li-${index}`}>{renderInlineMarkdown(numbered[1], `li-${index}`)}</li>
+      );
+      return;
+    }
+
+    flushList();
+    blocks.push(
+      <p key={`p-${index}`} className="text-sm leading-relaxed text-slate-700">
+        {renderInlineMarkdown(line, `p-${index}`)}
+      </p>
+    );
+  });
+
+  flushList();
+  return <div className="space-y-1">{blocks}</div>;
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory, onUpdateUser, onUpdateLogs, onUpdateWeight }) => {
   const [showLogModal, setShowLogModal] = useState(false);
   const [showGoalsModal, setShowGoalsModal] = useState(false);
@@ -558,7 +605,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             <h4 className="font-bold text-slate-950">AI Nutritionist</h4>
             <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wide">Beta</span>
           </div>
-          <p className="text-slate-700 text-sm leading-relaxed">{aiAdvice || "Analyzing your patterns..."}</p>
+          <FormattedAiAdvice text={aiAdvice || "Analyzing your patterns..."} />
           <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Based on recent logs and today’s remaining macros</p>
         </div>
         <div className="flex-shrink-0 mt-2 sm:mt-0">

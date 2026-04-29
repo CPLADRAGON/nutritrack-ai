@@ -205,9 +205,10 @@ export const getFoodSuggestion = async (
     
     My overall goal is: ${goal}.
 
-    Based on these remaining numbers, suggest 2 or 3 specific, simple snack or meal options that fit within this budget. 
+    Based on these remaining numbers, suggest 2 or 3 specific, simple snack or meal options that fit within this budget.
     If the numbers are negative (meaning I overate), suggest something extremely light like tea or cucumber slices.
     Keep the answer conversational, short, and appetizing. Max 50 words.
+    Markdown is allowed: use **bold** for food names and a short numbered list if helpful.
   `;
 
   try {
