@@ -119,7 +119,13 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <Layout userName={state.currentUser?.name} onLogout={handleLogout}>
+      <Layout
+        userName={state.currentUser?.name}
+        user={state.currentUser}
+        logs={state.logs}
+        weightHistory={state.weightHistory}
+        onLogout={handleLogout}
+      >
         {view === 'SETUP' ? (
           <ProfileSetup 
             onComplete={handleProfileComplete} 

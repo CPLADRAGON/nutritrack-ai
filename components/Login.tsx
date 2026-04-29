@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { GOOGLE_CLIENT_ID } from '../config';
+import { AppLogo } from './Icons';
 
 declare global {
   interface Window {
@@ -61,7 +62,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center mb-6">
           <div className="bg-white p-4 rounded-2xl shadow-xl shadow-emerald-100">
-            <span className="text-5xl">🥗</span>
+            <AppLogo className="w-14 h-14" />
           </div>
         </div>
         <h2 className="text-center text-3xl font-extrabold text-gray-900 tracking-tight">

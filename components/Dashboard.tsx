@@ -6,6 +6,21 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line
 } from 'recharts';
+import {
+  BotIcon,
+  BreakfastIcon,
+  CarbIcon,
+  DinnerIcon,
+  EnergyIcon,
+  FatIcon,
+  LunchIcon,
+  MealIcon,
+  ProteinIcon,
+  SnackIcon,
+  SparklesIcon,
+  TrashIcon,
+  ZapIcon,
+} from './Icons';
 
 const MAX_IMAGE_SIZE_MB = 5;
 const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
@@ -195,7 +210,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       }));
     } catch (err) {
       console.error(err);
-      alert("Failed to analyze. Please try again or enter details manually.");
+      const message = err instanceof Error ? err.message : "Failed to analyze. Please try again or enter details manually.";
+      alert(message);
     } finally {
       setIsAnalyzing(false);
     }
@@ -343,17 +359,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const calorieProgress = Math.min((totalCalories / user.targetCalories) * 100, 100);
   const latestWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight : user.weight;
   const macroSummary = [
-    { label: 'Calories', value: totalCalories, target: user.targetCalories, unit: 'kcal', color: 'emerald', text: 'text-emerald-700', bar: 'bg-emerald-500', soft: 'bg-emerald-50', icon: '🔥' },
-    { label: 'Protein', value: totalProtein, target: user.targetProtein, unit: 'g', color: 'blue', text: 'text-blue-700', bar: 'bg-blue-500', soft: 'bg-blue-50', icon: '💪' },
-    { label: 'Carbs', value: totalCarbs, target: user.targetCarbs, unit: 'g', color: 'orange', text: 'text-orange-700', bar: 'bg-orange-500', soft: 'bg-orange-50', icon: '🌾' },
-    { label: 'Fat', value: totalFat, target: user.targetFat, unit: 'g', color: 'purple', text: 'text-purple-700', bar: 'bg-purple-500', soft: 'bg-purple-50', icon: '🥑' },
+    { label: 'Calories', value: totalCalories, target: user.targetCalories, unit: 'kcal', text: 'text-emerald-700', bar: 'bg-emerald-500', soft: 'bg-emerald-50', icon: <EnergyIcon className="w-5 h-5" /> },
+    { label: 'Protein', value: totalProtein, target: user.targetProtein, unit: 'g', text: 'text-blue-700', bar: 'bg-blue-500', soft: 'bg-blue-50', icon: <ProteinIcon className="w-5 h-5" /> },
+    { label: 'Carbs', value: totalCarbs, target: user.targetCarbs, unit: 'g', text: 'text-orange-700', bar: 'bg-orange-500', soft: 'bg-orange-50', icon: <CarbIcon className="w-5 h-5" /> },
+    { label: 'Fat', value: totalFat, target: user.targetFat, unit: 'g', text: 'text-purple-700', bar: 'bg-purple-500', soft: 'bg-purple-50', icon: <FatIcon className="w-5 h-5" /> },
   ];
 
   const getMealIcon = (type: MealType) => {
-    if (type === MealType.BREAKFAST) return '🍳';
-    if (type === MealType.LUNCH) return '🍱';
-    if (type === MealType.DINNER) return '🍽️';
-    return '🥜';
+    if (type === MealType.BREAKFAST) return <BreakfastIcon className="w-5 h-5" />;
+    if (type === MealType.LUNCH) return <LunchIcon className="w-5 h-5" />;
+    if (type === MealType.DINNER) return <DinnerIcon className="w-5 h-5" />;
+    return <SnackIcon className="w-5 h-5" />;
   };
 
   return (
@@ -433,7 +449,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                     <span className="pb-1 text-sm font-semibold text-slate-400">/ {macro.target}{macro.unit}</span>
                   </div>
                 </div>
-                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${macro.soft} text-xl`} aria-hidden="true">{macro.icon}</div>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${macro.soft} ${macro.text}`} aria-hidden="true">{macro.icon}</div>
               </div>
               <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100">
                 <div className={`h-full rounded-full ${isOver ? 'bg-red-500' : macro.bar}`} style={{ width: `${percent}%` }}></div>
@@ -451,7 +467,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCalories > user.targetCalories ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
           <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCalories > user.targetCalories ? 'bg-red-100' : 'bg-emerald-100'}`}></div>
           <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-500'}`}>
-            Calories {totalCalories > user.targetCalories && '⚠️'}
+            Calories {totalCalories > user.targetCalories && '(over)'}
           </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className={`text-3xl font-extrabold tracking-tight ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-900'}`}>
@@ -468,7 +484,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalProtein > user.targetProtein ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
           <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalProtein > user.targetProtein ? 'bg-red-100' : 'bg-blue-100'}`}></div>
           <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalProtein > user.targetProtein ? 'text-red-600' : 'text-gray-500'}`}>
-            Protein {totalProtein > user.targetProtein && '⚠️'}
+            Protein {totalProtein > user.targetProtein && '(over)'}
           </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalProtein}g</span>
@@ -483,7 +499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCarbs > user.targetCarbs ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
           <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCarbs > user.targetCarbs ? 'bg-red-100' : 'bg-orange-100'}`}></div>
           <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCarbs > user.targetCarbs ? 'text-red-600' : 'text-gray-500'}`}>
-            Carbs {totalCarbs > user.targetCarbs && '⚠️'}
+            Carbs {totalCarbs > user.targetCarbs && '(over)'}
           </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalCarbs}g</span>
@@ -498,7 +514,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalFat > user.targetFat ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
           <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalFat > user.targetFat ? 'bg-red-100' : 'bg-purple-100'}`}></div>
           <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalFat > user.targetFat ? 'text-red-600' : 'text-gray-500'}`}>
-            Fat {totalFat > user.targetFat && '⚠️'}
+            Fat {totalFat > user.targetFat && '(over)'}
           </h3>
           <div className="flex items-end mt-3 relative z-10">
             <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalFat}g</span>
@@ -534,8 +550,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       {/* AI Advice Banner */}
       <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6 animate-fadeIn delay-100">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="flex-shrink-0 bg-white p-3 rounded-2xl shadow-sm text-3xl ring-1 ring-indigo-100">
-          🤖
+        <div className="flex-shrink-0 bg-white p-3 rounded-2xl shadow-sm text-indigo-600 ring-1 ring-indigo-100">
+          <BotIcon className="w-8 h-8" />
         </div>
         <div className="flex-grow">
           <div className="flex items-center gap-2 mb-2">
@@ -561,7 +577,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               </>
             ) : (
               <>
-                <span className="mr-2 text-lg">🍽️</span>
+                <MealIcon className="mr-2 h-4 w-4" />
                 What to eat?
               </>
             )}
@@ -631,7 +647,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 className="text-xs bg-purple-50 text-purple-600 px-3 py-2 rounded-full hover:bg-purple-100 transition font-bold border border-purple-100"
                 title="Update TDEE"
               >
-                ⚡ TDEE
+                <ZapIcon className="mr-1 inline h-3.5 w-3.5" /> TDEE
               </button>
               <button
                 onClick={() => setShowWeightModal(true)}
@@ -712,7 +728,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                   <article key={log.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-50 text-xl" aria-hidden="true">{getMealIcon(log.type)}</div>
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-50 text-emerald-700" aria-hidden="true">{getMealIcon(log.type)}</div>
                         <div>
                           <p className="text-sm font-bold text-slate-950">{log.description}</p>
                           <p className="mt-0.5 text-xs font-semibold text-slate-400">{log.time} · {log.type}</p>
@@ -766,10 +782,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">{idx === 0 ? date : ''}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-700">
-                            {log.type === MealType.BREAKFAST && '🍳'}
-                            {log.type === MealType.LUNCH && '🍱'}
-                            {log.type === MealType.DINNER && '🍽️'}
-                            {log.type === MealType.SNACK && '🥜'}
+                            <span className="text-emerald-700">{getMealIcon(log.type)}</span>
                             <span className="ml-2">{log.type}</span>
                           </span>
                         </td>
@@ -811,7 +824,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full animate-scaleIn">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6 flex items-center gap-2">
-                  <span>⚡</span> Update TDEE
+                  <ZapIcon className="w-5 h-5 text-purple-600" /> Update TDEE
                 </h3>
                 <p className="text-sm text-gray-500 mb-4">Total Daily Energy Expenditure is the number of calories you burn daily. This acts as your maintenance baseline.</p>
 
@@ -838,7 +851,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                       </>
                     ) : (
                       <>
-                        <span>✨</span> Recalculate based on Profile
+                        <SparklesIcon className="w-4 h-4" /> Recalculate based on Profile
                       </>
                     )}
                   </button>
@@ -952,7 +965,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 {/* AI Analysis Section */}
                 <div className="mb-8 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100">
                   <label className="block text-sm font-bold text-indigo-900 mb-3 flex items-center gap-2">
-                    <span>✨</span> AI Smart Analysis
+                    <SparklesIcon className="w-4 h-4" /> AI Smart Analysis
                   </label>
 
                   <div className="space-y-3">
@@ -1050,7 +1063,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}></div>
             <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full relative z-10 animate-scaleIn">
               <div className="text-center">
-                <div className="text-4xl mb-3">🗑️</div>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500"><TrashIcon className="w-6 h-6" /></div>
                 <h3 className="text-lg font-bold text-gray-900 mb-2">Delete this meal?</h3>
                 <p className="text-sm text-gray-500 mb-6">This action cannot be undone.</p>
                 <div className="flex gap-3">

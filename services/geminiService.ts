@@ -7,11 +7,16 @@ declare const process: {
   };
 };
 
-const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
 
-const getAiClient = () => new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
+const getAiClient = () => {
+  if (!process.env.VITE_API_KEY) {
+    throw new Error('Gemini API key is missing. For local development, add VITE_API_KEY to a .env file. For deployment, redeploy after setting the API_KEY GitHub Actions secret.');
+  }
+  return new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
+};
 
 // Retry wrapper with exponential backoff for transient/rate-limit errors
 const withRetry = async <T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> => {
@@ -27,6 +32,22 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promis
     }
   }
   throw new Error('Max retries exceeded');
+};
+
+const isAuthError = (error: any) => error?.status === 401 || error?.status === 403 || error?.httpStatusCode === 401 || error?.httpStatusCode === 403;
+
+const withModelFallback = async <T>(fn: (model: string) => Promise<T>): Promise<T> => {
+  let lastError: unknown;
+  for (const model of GEMINI_MODELS) {
+    try {
+      return await withRetry(() => fn(model));
+    } catch (error: any) {
+      lastError = error;
+      if (isAuthError(error)) throw error;
+      console.warn(`Gemini model ${model} failed; trying fallback if available.`, error);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('All Gemini models failed.');
 };
 
 const foodAnalysisSchema = {
@@ -84,8 +105,8 @@ export const analyzeFood = async (base64Image: string | null, textDescription: s
 
     parts.push({ text: promptText });
 
-    const response = await withRetry(() => ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await withModelFallback((model) => ai.models.generateContent({
+      model,
       contents: {
         parts: parts
       },
@@ -124,8 +145,8 @@ export const generatePlanFromProfile = async (profile: Partial<UserProfile>): Pr
   `;
 
   try {
-    const response = await withRetry(() => ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await withModelFallback((model) => ai.models.generateContent({
+      model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -158,8 +179,8 @@ export const getDailyAdvice = async (profile: UserProfile, logs: MealLog[]): Pro
   `;
 
   try {
-    const response = await withRetry(() => ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await withModelFallback((model) => ai.models.generateContent({
+      model,
       contents: prompt,
     }));
     return response.text || "Keep tracking to get better advice!";
@@ -190,8 +211,8 @@ export const getFoodSuggestion = async (
   `;
 
   try {
-    const response = await withRetry(() => ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await withModelFallback((model) => ai.models.generateContent({
+      model,
       contents: prompt,
     }));
     return response.text || "Try a light protein snack!";
