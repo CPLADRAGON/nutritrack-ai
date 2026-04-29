@@ -8,8 +8,12 @@ export const saveUser = (user: UserProfile) => {
 };
 
 export const loadUser = (name: string): UserProfile | null => {
-  const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}user_${name}`);
-  return data ? JSON.parse(data) : null;
+  try {
+    const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}user_${name}`);
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
 };
 
 export const getLastUser = (): string | null => {
@@ -21,9 +25,13 @@ export const getAllUsers = (): UserProfile[] => {
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith(`${STORAGE_KEY_PREFIX}user_`)) {
-      const userData = localStorage.getItem(key);
-      if (userData) {
-        users.push(JSON.parse(userData));
+      try {
+        const userData = localStorage.getItem(key);
+        if (userData) {
+          users.push(JSON.parse(userData));
+        }
+      } catch {
+        // Skip corrupted entries
       }
     }
   }
@@ -35,8 +43,12 @@ export const saveLogs = (username: string, logs: MealLog[]) => {
 };
 
 export const loadLogs = (username: string): MealLog[] => {
-  const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}logs_${username}`);
-  return data ? JSON.parse(data) : [];
+  try {
+    const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}logs_${username}`);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
 };
 
 export const saveWeightHistory = (username: string, history: WeightLog[]) => {
@@ -44,6 +56,10 @@ export const saveWeightHistory = (username: string, history: WeightLog[]) => {
 };
 
 export const loadWeightHistory = (username: string): WeightLog[] => {
-  const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}weight_${username}`);
-  return data ? JSON.parse(data) : [];
+  try {
+    const data = localStorage.getItem(`${STORAGE_KEY_PREFIX}weight_${username}`);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
 };

@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Layout } from './components/Layout';
 import { ProfileSetup } from './components/ProfileSetup';
 import { Dashboard } from './components/Dashboard';
 import { Login } from './components/Login';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppState, MealLog, UserProfile, WeightLog } from './types';
 import { SheetService } from './services/sheetService';
 
@@ -18,15 +19,19 @@ const App: React.FC = () => {
   
   const sheetServiceRef = useRef<SheetService | null>(null);
 
+  const handleTokenExpired = useCallback(() => {
+    alert('Your session has expired. Please sign in again.');
+    setState({ currentUser: null, logs: [], weightHistory: [] });
+    sheetServiceRef.current = null;
+    setView('LOGIN');
+  }, []);
+
   const handleLoginSuccess = async (token: string) => {
     setView('LOADING_DATA');
-    sheetServiceRef.current = new SheetService(token);
+    sheetServiceRef.current = new SheetService(token, handleTokenExpired);
     
     try {
-      // Initialize (Find or Create Sheet)
       await sheetServiceRef.current.init();
-      
-      // Load Data
       const data = await sheetServiceRef.current.loadData();
       
       if (data.user) {
@@ -37,7 +42,6 @@ const App: React.FC = () => {
         });
         setView('DASHBOARD');
       } else {
-        // User authenticated but no profile yet
         setView('SETUP');
       }
     } catch (error) {
@@ -66,21 +70,33 @@ const App: React.FC = () => {
   const handleUpdateUser = async (user: UserProfile) => {
     setState(prev => ({ ...prev, currentUser: user }));
     if (sheetServiceRef.current) {
-      await sheetServiceRef.current.saveUser(user);
+      try {
+        await sheetServiceRef.current.saveUser(user);
+      } catch (e) {
+        console.error("Failed to save user update", e);
+      }
     }
   };
 
   const handleUpdateLogs = async (logs: MealLog[]) => {
     setState(prev => ({ ...prev, logs }));
     if (sheetServiceRef.current) {
-      await sheetServiceRef.current.saveLogs(logs);
+      try {
+        await sheetServiceRef.current.saveLogs(logs);
+      } catch (e) {
+        console.error("Failed to save logs", e);
+      }
     }
   };
 
   const handleUpdateWeight = async (history: WeightLog[]) => {
     setState(prev => ({ ...prev, weightHistory: history }));
     if (sheetServiceRef.current) {
-      await sheetServiceRef.current.saveWeight(history);
+      try {
+        await sheetServiceRef.current.saveWeight(history);
+      } catch (e) {
+        console.error("Failed to save weight", e);
+      }
     }
   };
 
@@ -88,7 +104,6 @@ const App: React.FC = () => {
     setState({ currentUser: null, logs: [], weightHistory: [] });
     sheetServiceRef.current = null;
     setView('LOGIN');
-    // Note: To fully logout of Google, one might need to revoke token, but usually clearing client state is enough for single page apps without backend session.
   };
 
   if (view === 'LOADING_DATA') {
@@ -103,25 +118,27 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout userName={state.currentUser?.name} onLogout={handleLogout}>
-      {view === 'SETUP' ? (
-        <ProfileSetup 
-          onComplete={handleProfileComplete} 
-          onCancel={() => setView('LOGIN')}
-        />
-      ) : (
-        state.currentUser && (
-          <Dashboard 
-             user={state.currentUser}
-             logs={state.logs}
-             weightHistory={state.weightHistory}
-             onUpdateUser={handleUpdateUser}
-             onUpdateLogs={handleUpdateLogs}
-             onUpdateWeight={handleUpdateWeight}
+    <ErrorBoundary>
+      <Layout userName={state.currentUser?.name} onLogout={handleLogout}>
+        {view === 'SETUP' ? (
+          <ProfileSetup 
+            onComplete={handleProfileComplete} 
+            onCancel={() => setView('LOGIN')}
           />
-        )
-      )}
-    </Layout>
+        ) : (
+          state.currentUser && (
+            <Dashboard 
+               user={state.currentUser}
+               logs={state.logs}
+               weightHistory={state.weightHistory}
+               onUpdateUser={handleUpdateUser}
+               onUpdateLogs={handleUpdateLogs}
+               onUpdateWeight={handleUpdateWeight}
+            />
+          )
+        )}
+      </Layout>
+    </ErrorBoundary>
   );
 };
 

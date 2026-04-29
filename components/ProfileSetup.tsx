@@ -21,27 +21,53 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const age = Number(formData.age);
+    const height = Number(formData.height);
+    const weight = Number(formData.weight);
+
+    if (!formData.name.trim()) {
+      alert('Please enter your name.');
+      return;
+    }
+    if (age < 13 || age > 120) {
+      alert('Please enter a valid age (13-120).');
+      return;
+    }
+    if (height < 50 || height > 300) {
+      alert('Please enter a valid height (50-300 cm).');
+      return;
+    }
+    if (weight < 20 || weight > 500) {
+      alert('Please enter a valid weight (20-500 kg).');
+      return;
+    }
+
     setLoading(true);
     try {
-      // 1. Get AI recommendations
-      const plan = await generatePlanFromProfile(formData as any);
-
-      // 2. Construct full profile
-      const newProfile: UserProfile = {
-        id: Date.now().toString(),
-        name: formData.name,
-        age: Number(formData.age),
+      const plan = await generatePlanFromProfile({
+        age,
         gender: formData.gender as 'MALE' | 'FEMALE',
-        height: Number(formData.height),
-        weight: Number(formData.weight),
+        height,
+        weight,
         activityLevel: formData.activityLevel,
         goal: formData.goal,
-        tdee: plan.tdee, // Save TDEE
+      } as Partial<UserProfile>);
+
+      const newProfile: UserProfile = {
+        id: Date.now().toString(),
+        name: formData.name.trim(),
+        age,
+        gender: formData.gender as 'MALE' | 'FEMALE',
+        height,
+        weight,
+        activityLevel: formData.activityLevel,
+        goal: formData.goal,
+        tdee: plan.tdee,
         targetCalories: plan.targetCalories,
         targetProtein: plan.targetProtein,
         targetCarbs: plan.targetCarbs,
         targetFat: plan.targetFat,
-        // Use Singapore time for the record creation date
         createdAt: new Date().toLocaleString('en-US', { timeZone: 'Asia/Singapore' })
       };
 
@@ -76,7 +102,7 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Age</label>
-            <input required name="age" type="number" value={formData.age} onChange={handleChange} className={inputClass} />
+            <input required name="age" type="number" min="13" max="120" value={formData.age} onChange={handleChange} className={inputClass} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Gender</label>
@@ -90,11 +116,11 @@ export const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete, onCancel
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Height (cm)</label>
-            <input required name="height" type="number" value={formData.height} onChange={handleChange} className={inputClass} />
+            <input required name="height" type="number" min="50" max="300" value={formData.height} onChange={handleChange} className={inputClass} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Weight (kg)</label>
-            <input required name="weight" type="number" value={formData.weight} onChange={handleChange} className={inputClass} />
+            <input required name="weight" type="number" min="20" max="500" step="0.1" value={formData.weight} onChange={handleChange} className={inputClass} />
           </div>
         </div>
 

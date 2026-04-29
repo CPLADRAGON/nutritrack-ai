@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { UserProfile, MealLog, WeightLog, MealType } from '../types';
 import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
@@ -6,6 +6,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line
 } from 'recharts';
+
+const MAX_IMAGE_SIZE_MB = 5;
+const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 
 interface DashboardProps {
   user: UserProfile;
@@ -21,6 +24,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const [showGoalsModal, setShowGoalsModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [showTDEEModal, setShowTDEEModal] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -66,38 +70,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Stats Calculation (Based on Singapore Date)
+  // Memoized stats calculation
   const today = getSingaporeDate();
-  const todayLogs = logs.filter(l => l.date === today);
+  const todayLogs = useMemo(() => logs.filter(l => l.date === today), [logs, today]);
 
-  const totalCalories = todayLogs.reduce((acc, curr) => acc + curr.calories, 0);
-  const totalProtein = todayLogs.reduce((acc, curr) => acc + curr.protein, 0);
-  const totalCarbs = todayLogs.reduce((acc, curr) => acc + curr.carbs, 0);
-  const totalFat = todayLogs.reduce((acc, curr) => acc + curr.fat, 0);
+  const totalCalories = useMemo(() => todayLogs.reduce((acc, curr) => acc + curr.calories, 0), [todayLogs]);
+  const totalProtein = useMemo(() => todayLogs.reduce((acc, curr) => acc + curr.protein, 0), [todayLogs]);
+  const totalCarbs = useMemo(() => todayLogs.reduce((acc, curr) => acc + curr.carbs, 0), [todayLogs]);
+  const totalFat = useMemo(() => todayLogs.reduce((acc, curr) => acc + curr.fat, 0), [todayLogs]);
 
-  // Deficit Calculations
-  const userTDEE = user.tdee || user.targetCalories; // Fallback if old user
+  const userTDEE = user.tdee || user.targetCalories;
   const todayDeficit = userTDEE - totalCalories;
 
-  // Calculate All-time Deficit
-  // 1. Group all logs by date
-  const allLogsByDate = logs.reduce((acc, log) => {
+  // All-time deficit: only count days that actually have logs
+  const allLogsByDate = useMemo(() => logs.reduce((acc, log) => {
     if (!acc[log.date]) acc[log.date] = 0;
     acc[log.date] += log.calories;
     return acc;
-  }, {} as Record<string, number>);
+  }, {} as Record<string, number>), [logs]);
 
-  // 2. Sum deficits (Only for days that have logs)
-  let totalDeficit = 0;
-  Object.values(allLogsByDate).forEach(dailyCals => {
-    totalDeficit += (userTDEE - dailyCals);
-  });
+  const totalDeficit = useMemo(() => {
+    let deficit = 0;
+    Object.values(allLogsByDate).forEach(dailyCals => {
+      if (dailyCals > 0) { // Exclude days with zero calories logged
+        deficit += (userTDEE - dailyCals);
+      }
+    });
+    return deficit;
+  }, [allLogsByDate, userTDEE]);
 
 
   useEffect(() => {
     getDailyAdvice(user, logs).then(setAiAdvice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs.length]);
+
+  // Keyboard escape handler for all modals
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (deleteConfirmId) setDeleteConfirmId(null);
+        else if (showLogModal) closeLogModal();
+        else if (showGoalsModal) setShowGoalsModal(false);
+        else if (showWeightModal) setShowWeightModal(false);
+        else if (showTDEEModal) setShowTDEEModal(false);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showLogModal, showGoalsModal, showWeightModal, showTDEEModal, deleteConfirmId]);
 
   const handleGetSuggestion = async () => {
     setIsSuggesting(true);
@@ -138,6 +159,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      alert(`Image too large. Maximum size is ${MAX_IMAGE_SIZE_MB}MB.`);
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onloadend = () => {
       setSelectedImage(reader.result as string);
@@ -214,18 +240,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     setFoodDescriptionInput('');
   };
 
-  const deleteLog = (id: string) => {
-    const updated = logs.filter(l => l.id !== id);
+  const deleteLog = useCallback((id: string) => {
+    setDeleteConfirmId(id);
+  }, []);
+
+  const confirmDeleteLog = useCallback(() => {
+    if (!deleteConfirmId) return;
+    const updated = logs.filter(l => l.id !== deleteConfirmId);
     onUpdateLogs(updated);
-  };
+    setDeleteConfirmId(null);
+  }, [deleteConfirmId, logs, onUpdateLogs]);
 
   const handleUpdateGoals = () => {
+    const cals = Number(editGoals.calories);
+    const protein = Number(editGoals.protein);
+    const carbs = Number(editGoals.carbs);
+    const fat = Number(editGoals.fat);
+
+    if (cals <= 0 || protein < 0 || carbs < 0 || fat < 0) {
+      alert('Please enter valid positive values for all nutrition goals.');
+      return;
+    }
+    if (cals > 10000) {
+      alert('Calorie target seems unreasonably high. Please double-check.');
+      return;
+    }
+
     const updatedUser = {
       ...user,
-      targetCalories: Number(editGoals.calories),
-      targetProtein: Number(editGoals.protein),
-      targetCarbs: Number(editGoals.carbs),
-      targetFat: Number(editGoals.fat),
+      targetCalories: cals,
+      targetProtein: protein,
+      targetCarbs: carbs,
+      targetFat: fat,
     };
     onUpdateUser(updatedUser);
     setShowGoalsModal(false);
@@ -261,47 +307,146 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   };
 
   // Group logs by date for the summary table
-  const logsByDate = logs.reduce((acc, log) => {
+  const logsByDate = useMemo(() => logs.reduce((acc, log) => {
     if (!acc[log.date]) acc[log.date] = [];
     acc[log.date].push(log);
     return acc;
-  }, {} as Record<string, MealLog[]>);
+  }, {} as Record<string, MealLog[]>), [logs]);
 
-  const sortedDates = Object.keys(logsByDate).sort((a, b) => b.localeCompare(a));
+  const sortedDates = useMemo(() => Object.keys(logsByDate).sort((a, b) => b.localeCompare(a)), [logsByDate]);
 
   // Prepare Calorie Chart Data
-  const calorieCutoff = getSingaporePastDate(calorieRange);
-  const calorieChartData = Object.entries(logsByDate)
-    .filter(([date]) => date >= calorieCutoff)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, dayLogs]) => ({
-      date: date.slice(5), // MM-DD
-      cals: (dayLogs as MealLog[]).reduce((a, c) => a + c.calories, 0)
-    }));
+  const calorieChartData = useMemo(() => {
+    const calorieCutoff = getSingaporePastDate(calorieRange);
+    return Object.entries(logsByDate)
+      .filter(([date]) => date >= calorieCutoff)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, dayLogs]) => ({
+        date: date.slice(5),
+        cals: (dayLogs as MealLog[]).reduce((a, c) => a + c.calories, 0)
+      }));
+  }, [logsByDate, calorieRange]);
 
   // Prepare Weight Chart Data
-  const weightCutoff = getSingaporePastDate(weightRange);
-  const weightChartData = weightHistory
-    .filter(w => w.date >= weightCutoff)
-    .map(w => ({
-      date: w.date.slice(5),
-      weight: w.weight
-    }));
+  const weightChartData = useMemo(() => {
+    const weightCutoff = getSingaporePastDate(weightRange);
+    return weightHistory
+      .filter(w => w.date >= weightCutoff)
+      .map(w => ({
+        date: w.date.slice(5),
+        weight: w.weight
+      }));
+  }, [weightHistory, weightRange]);
 
-  const inputClass = "w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
+  const inputClass = "w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50 text-slate-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
+  const remainingCalories = user.targetCalories - totalCalories;
+  const calorieProgress = Math.min((totalCalories / user.targetCalories) * 100, 100);
+  const latestWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight : user.weight;
+  const macroSummary = [
+    { label: 'Calories', value: totalCalories, target: user.targetCalories, unit: 'kcal', color: 'emerald', text: 'text-emerald-700', bar: 'bg-emerald-500', soft: 'bg-emerald-50', icon: '🔥' },
+    { label: 'Protein', value: totalProtein, target: user.targetProtein, unit: 'g', color: 'blue', text: 'text-blue-700', bar: 'bg-blue-500', soft: 'bg-blue-50', icon: '💪' },
+    { label: 'Carbs', value: totalCarbs, target: user.targetCarbs, unit: 'g', color: 'orange', text: 'text-orange-700', bar: 'bg-orange-500', soft: 'bg-orange-50', icon: '🌾' },
+    { label: 'Fat', value: totalFat, target: user.targetFat, unit: 'g', color: 'purple', text: 'text-purple-700', bar: 'bg-purple-500', soft: 'bg-purple-50', icon: '🥑' },
+  ];
+
+  const getMealIcon = (type: MealType) => {
+    if (type === MealType.BREAKFAST) return '🍳';
+    if (type === MealType.LUNCH) return '🍱';
+    if (type === MealType.DINNER) return '🍽️';
+    return '🥜';
+  };
 
   return (
-    <div className="space-y-8 pb-20">
-      {/* Top Stats Cards */}
+    <div className="space-y-6 pb-24">
+      {/* Today Summary Hero */}
+      <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-sm animate-slideUp">
+        <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-emerald-50 via-teal-50/60 to-transparent" aria-hidden="true"></div>
+        <div className="relative grid gap-6 p-5 sm:p-6 lg:grid-cols-[1.4fr_1fr] lg:p-8">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-600">Today · {today}</p>
+            <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
+              <h2 className="text-3xl font-extrabold tracking-tight text-slate-950 sm:text-4xl">{totalCalories}</h2>
+              <span className="pb-1 text-sm font-semibold text-slate-500">/ {user.targetCalories} kcal</span>
+            </div>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
+              {remainingCalories >= 0
+                ? `${remainingCalories} kcal remaining for your daily target.`
+                : `${Math.abs(remainingCalories)} kcal over target — keep the next meal light.`}
+            </p>
+            <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${remainingCalories < 0 ? 'bg-red-500' : 'bg-emerald-500'}`}
+                style={{ width: `${calorieProgress}%` }}
+                role="progressbar"
+                aria-label="Daily calories progress"
+                aria-valuenow={Math.round(calorieProgress)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              ></div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Deficit today</p>
+              <p className={`mt-2 text-2xl font-extrabold ${todayDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>{todayDeficit > 0 ? '+' : ''}{todayDeficit}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Current weight</p>
+              <p className="mt-2 text-2xl font-extrabold text-slate-950">{latestWeight}<span className="text-sm text-slate-500">kg</span></p>
+            </div>
+            <button
+              onClick={() => setShowLogModal(true)}
+              className="col-span-2 inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:-translate-y-0.5 hover:bg-emerald-600 sm:col-span-1 lg:col-span-2"
+            >
+              + Log meal
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Macro Progress */}
       <div className="flex justify-between items-center animate-slideUp">
-        <h2 className="text-xl font-bold text-gray-800">Daily Summary</h2>
-        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-medium flex items-center bg-emerald-50 px-3 py-1.5 rounded-full transition-colors">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Macro Progress</h2>
+          <p className="text-sm text-slate-500">Clear daily targets with nutrition-specific colors.</p>
+        </div>
+        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-bold flex items-center bg-emerald-50 px-3 py-2 rounded-full transition-colors border border-emerald-100">
           <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
           Edit Goals
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 animate-slideUp delay-75">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-slideUp delay-75">
+        {macroSummary.map((macro) => {
+          const isOver = macro.value > macro.target;
+          const remaining = macro.target - macro.value;
+          const percent = Math.min((macro.value / macro.target) * 100, 100);
+
+          return (
+            <div key={macro.label} className={`rounded-3xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isOver ? 'ring-2 ring-red-100' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{macro.label}</p>
+                  <div className="mt-3 flex items-end gap-2">
+                    <span className="text-3xl font-extrabold tracking-tight text-slate-950">{macro.value}</span>
+                    <span className="pb-1 text-sm font-semibold text-slate-400">/ {macro.target}{macro.unit}</span>
+                  </div>
+                </div>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${macro.soft} text-xl`} aria-hidden="true">{macro.icon}</div>
+              </div>
+              <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full ${isOver ? 'bg-red-500' : macro.bar}`} style={{ width: `${percent}%` }}></div>
+              </div>
+              <p className={`mt-3 text-sm font-semibold ${isOver ? 'text-red-600' : macro.text}`}>
+                {isOver ? `${Math.abs(remaining)}${macro.unit} over target` : `${remaining}${macro.unit} remaining`}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden">
         {/* Calories Card */}
         <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCalories > user.targetCalories ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
           <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCalories > user.targetCalories ? 'bg-red-100' : 'bg-emerald-100'}`}></div>
@@ -387,22 +532,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       </div>
 
       {/* AI Advice Banner */}
-      <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 p-6 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center gap-5 shadow-sm hover:shadow-md transition-shadow animate-fadeIn delay-100">
-        <div className="flex-shrink-0 bg-white p-3 rounded-full shadow-sm text-3xl">
+      <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6 animate-fadeIn delay-100">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="flex-shrink-0 bg-white p-3 rounded-2xl shadow-sm text-3xl ring-1 ring-indigo-100">
           🤖
         </div>
         <div className="flex-grow">
           <div className="flex items-center gap-2 mb-2">
-            <h4 className="font-bold text-indigo-900">AI Nutritionist Insights</h4>
+            <h4 className="font-bold text-slate-950">AI Nutritionist</h4>
             <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wide">Beta</span>
           </div>
-          <p className="text-indigo-800 text-sm leading-relaxed">{aiAdvice || "Analyzing your patterns..."}</p>
+          <p className="text-slate-700 text-sm leading-relaxed">{aiAdvice || "Analyzing your patterns..."}</p>
+          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Based on recent logs and today’s remaining macros</p>
         </div>
         <div className="flex-shrink-0 mt-2 sm:mt-0">
           <button
             onClick={handleGetSuggestion}
             disabled={isSuggesting}
-            className="group relative flex items-center justify-center px-5 py-2.5 border border-transparent text-sm font-semibold rounded-full text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed active:scale-95"
+            className="group relative flex items-center justify-center px-5 py-3 border border-transparent text-sm font-bold rounded-full text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed active:scale-95"
           >
             {isSuggesting ? (
               <>
@@ -420,22 +567,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             )}
           </button>
         </div>
+        </div>
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-slideUp delay-200">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 animate-slideUp delay-200">
 
         {/* Calorie History Chart */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+        <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md sm:p-6">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+            <h3 className="font-bold text-slate-950 flex items-center gap-2">
               <span className="w-2.5 h-6 bg-emerald-500 rounded-full"></span>
               Calorie Intake
             </h3>
             <select
               value={calorieRange}
               onChange={(e) => setCalorieRange(Number(e.target.value))}
-              className="text-xs border-gray-200 rounded-lg border p-2 bg-gray-50 text-gray-700 focus:ring-emerald-500 focus:border-emerald-500 outline-none cursor-pointer hover:bg-gray-100 transition"
+              className="text-xs border-slate-200 rounded-full border px-3 py-2 bg-slate-50 text-slate-700 focus:ring-emerald-500 focus:border-emerald-500 outline-none cursor-pointer hover:bg-slate-100 transition font-semibold"
             >
               <option value={7}>Last 7 Days</option>
               <option value={30}>Last 30 Days</option>
@@ -465,36 +613,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50 rounded-xl border border-dashed border-gray-200">No data for selected range</div>
+              <div className="flex items-center justify-center h-full text-slate-400 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">No data for selected range</div>
             )}
           </div>
         </div>
 
         {/* Weight Trend Chart */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+        <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm transition hover:shadow-md sm:p-6">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+            <h3 className="font-bold text-slate-950 flex items-center gap-2">
               <span className="w-2.5 h-6 bg-blue-500 rounded-full"></span>
               Weight Trend
             </h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowTDEEModal(true)}
-                className="text-xs bg-purple-50 text-purple-600 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition font-bold"
+                className="text-xs bg-purple-50 text-purple-600 px-3 py-2 rounded-full hover:bg-purple-100 transition font-bold border border-purple-100"
                 title="Update TDEE"
               >
                 ⚡ TDEE
               </button>
               <button
                 onClick={() => setShowWeightModal(true)}
-                className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition font-bold"
+                className="text-xs bg-blue-50 text-blue-600 px-3 py-2 rounded-full hover:bg-blue-100 transition font-bold border border-blue-100"
               >
                 + Log
               </button>
               <select
                 value={weightRange}
                 onChange={(e) => setWeightRange(Number(e.target.value))}
-                className="text-xs border-gray-200 rounded-lg border p-2 bg-gray-50 text-gray-700 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer hover:bg-gray-100 transition"
+                className="text-xs border-slate-200 rounded-full border px-3 py-2 bg-slate-50 text-slate-700 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer hover:bg-slate-100 transition font-semibold"
               >
                 <option value={7}>Last 7 Days</option>
                 <option value={30}>Last 30 Days</option>
@@ -518,7 +666,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50 rounded-xl border border-dashed border-gray-200">
+              <div className="flex items-center justify-center h-full text-slate-400 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                 {weightHistory.length === 0 ? "No weight history yet" : "No data for selected range"}
               </div>
             )}
@@ -530,6 +678,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       <div className="fixed bottom-8 right-8 z-40">
         <button
           onClick={() => setShowLogModal(true)}
+          aria-label="Log a new meal"
           className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-full p-4 shadow-xl shadow-emerald-200/50 flex items-center justify-center transition-all transform hover:scale-110 hover:-translate-y-1 active:scale-95 group"
         >
           <svg className="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
@@ -537,12 +686,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       </div>
 
       {/* Daily Logs List */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-slideUp delay-300">
-        <div className="p-6 border-b border-gray-50 bg-gray-50/50">
-          <h3 className="font-bold text-lg text-gray-900">Daily Journal</h3>
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden animate-slideUp delay-300">
+        <div className="p-5 sm:p-6 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-lg text-slate-950">Daily Journal</h3>
+            <p className="text-sm text-slate-500">Grouped by day, optimized for quick meal review.</p>
+          </div>
+          <span className="hidden sm:inline-flex rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">{logs.length} meals</span>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="space-y-4 p-4 md:hidden">
+          {sortedDates.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400">No meals logged yet</div>
+          ) : sortedDates.map(date => {
+            const dayLogs = [...logsByDate[date]].sort((a, b) => a.time.localeCompare(b.time));
+            const dayTotalCals = dayLogs.reduce((a, c) => a + c.calories, 0);
+
+            return (
+              <section key={date} className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <h4 className="text-sm font-bold text-slate-900">{date}</h4>
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{dayTotalCals} kcal</span>
+                </div>
+                {dayLogs.map(log => (
+                  <article key={log.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-50 text-xl" aria-hidden="true">{getMealIcon(log.type)}</div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-950">{log.description}</p>
+                          <p className="mt-0.5 text-xs font-semibold text-slate-400">{log.time} · {log.type}</p>
+                        </div>
+                      </div>
+                      <button onClick={() => deleteLog(log.id)} aria-label="Delete meal log" className="rounded-full p-2 text-slate-300 transition hover:bg-red-50 hover:text-red-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-4 gap-2 text-center text-xs font-bold">
+                      <span className="rounded-xl bg-emerald-50 px-2 py-2 text-emerald-700">{log.calories} kcal</span>
+                      <span className="rounded-xl bg-blue-50 px-2 py-2 text-blue-700">P {log.protein}g</span>
+                      <span className="rounded-xl bg-orange-50 px-2 py-2 text-orange-700">C {log.carbs}g</span>
+                      <span className="rounded-xl bg-purple-50 px-2 py-2 text-purple-700">F {log.fat}g</span>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            );
+          })}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-white">
               <tr>
@@ -584,7 +779,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{log.carbs}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{log.fat}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button onClick={() => deleteLog(log.id)} className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                          <button onClick={() => deleteLog(log.id)} aria-label="Delete meal log" className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
@@ -673,20 +868,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Daily Calories (kcal)</label>
-                    <input type="number" className={inputClass} value={editGoals.calories} onChange={e => setEditGoals({ ...editGoals, calories: Number(e.target.value) })} />
+                    <input type="number" min="1" max="10000" className={inputClass} value={editGoals.calories} onChange={e => setEditGoals({ ...editGoals, calories: Number(e.target.value) })} />
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Protein (g)</label>
-                      <input type="number" className={inputClass} value={editGoals.protein} onChange={e => setEditGoals({ ...editGoals, protein: Number(e.target.value) })} />
+                      <input type="number" min="0" className={inputClass} value={editGoals.protein} onChange={e => setEditGoals({ ...editGoals, protein: Number(e.target.value) })} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Carbs (g)</label>
-                      <input type="number" className={inputClass} value={editGoals.carbs} onChange={e => setEditGoals({ ...editGoals, carbs: Number(e.target.value) })} />
+                      <input type="number" min="0" className={inputClass} value={editGoals.carbs} onChange={e => setEditGoals({ ...editGoals, carbs: Number(e.target.value) })} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Fat (g)</label>
-                      <input type="number" className={inputClass} value={editGoals.fat} onChange={e => setEditGoals({ ...editGoals, fat: Number(e.target.value) })} />
+                      <input type="number" min="0" className={inputClass} value={editGoals.fat} onChange={e => setEditGoals({ ...editGoals, fat: Number(e.target.value) })} />
                     </div>
                   </div>
                 </div>
@@ -842,6 +1037,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 <button type="button" onClick={closeLogModal} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Cancel
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Confirm deletion">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}></div>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full relative z-10 animate-scaleIn">
+              <div className="text-center">
+                <div className="text-4xl mb-3">🗑️</div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Delete this meal?</h3>
+                <p className="text-sm text-gray-500 mb-6">This action cannot be undone.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="flex-1 py-2.5 px-4 rounded-xl border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDeleteLog}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           </div>

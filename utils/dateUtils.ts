@@ -21,16 +21,14 @@ export const getSingaporeTime = (): string => {
 };
 
 export const getSingaporePastDate = (daysAgo: number): string => {
-    // Get current time in SGT
-    const nowStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Singapore' });
-    const sgDate = new Date(nowStr);
-
-    // Subtract days
-    sgDate.setDate(sgDate.getDate() - daysAgo);
-
-    // Format manually to YYYY-MM-DD to avoid timezone shifts back to local
-    const year = sgDate.getFullYear();
-    const month = String(sgDate.getMonth() + 1).padStart(2, '0');
-    const day = String(sgDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const now = new Date();
+    // Subtract days in UTC to avoid DST issues, then format in SGT
+    const past = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Singapore',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    return formatter.format(past);
 };

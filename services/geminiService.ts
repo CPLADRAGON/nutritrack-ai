@@ -1,16 +1,34 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { UserProfile, MealLog } from "../types";
 
-// Declare process to satisfy TS compiler since Vite injects it
 declare const process: {
   env: {
-    API_KEY: string;
+    VITE_API_KEY: string;
   };
 };
 
-const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
 
-// Schema for Food Analysis
+const getAiClient = () => new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
+
+// Retry wrapper with exponential backoff for transient/rate-limit errors
+const withRetry = async <T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const status = error?.status || error?.httpStatusCode;
+      const isRetryable = status === 429 || status === 503 || status === 500;
+      if (!isRetryable || attempt === retries) throw error;
+      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Max retries exceeded');
+};
+
 const foodAnalysisSchema = {
   type: Type.OBJECT,
   properties: {
@@ -24,7 +42,6 @@ const foodAnalysisSchema = {
   required: ["foodName", "calories", "protein", "carbs", "fat"]
 };
 
-// Schema for Profile Planning
 const profilePlanSchema = {
   type: Type.OBJECT,
   properties: {
@@ -67,8 +84,8 @@ export const analyzeFood = async (base64Image: string | null, textDescription: s
 
     parts.push({ text: promptText });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: GEMINI_MODEL,
       contents: {
         parts: parts
       },
@@ -77,7 +94,7 @@ export const analyzeFood = async (base64Image: string | null, textDescription: s
         responseSchema: foodAnalysisSchema,
         systemInstruction: "You are an expert nutritionist and dietitian. You are analyzing photos or descriptions of food to help a user track their daily intake."
       }
-    });
+    }));
 
     if (response.text) {
       return JSON.parse(response.text);
@@ -107,14 +124,14 @@ export const generatePlanFromProfile = async (profile: Partial<UserProfile>): Pr
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: GEMINI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: profilePlanSchema,
       }
-    });
+    }));
 
     if (response.text) {
       return JSON.parse(response.text);
@@ -141,12 +158,13 @@ export const getDailyAdvice = async (profile: UserProfile, logs: MealLog[]): Pro
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: GEMINI_MODEL,
       contents: prompt,
-    });
+    }));
     return response.text || "Keep tracking to get better advice!";
   } catch (e) {
+    console.error("Daily Advice Error:", e);
     return "Great job tracking your meals!";
   }
 };
@@ -172,13 +190,13 @@ export const getFoodSuggestion = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: GEMINI_MODEL,
       contents: prompt,
-    });
+    }));
     return response.text || "Try a light protein snack!";
   } catch (e) {
-    console.error("Suggestion Error", e);
+    console.error("Suggestion Error:", e);
     return "Could not generate suggestion right now.";
   }
 };

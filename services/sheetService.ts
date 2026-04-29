@@ -7,9 +7,12 @@ const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3/files';
 export class SheetService {
   private accessToken: string;
   private spreadsheetId: string | null = null;
+  private initializing: Promise<boolean> | null = null;
+  private onTokenExpired?: () => void;
 
-  constructor(token: string) {
+  constructor(token: string, onTokenExpired?: () => void) {
     this.accessToken = token;
+    this.onTokenExpired = onTokenExpired;
   }
 
   private async fetch(url: string, options: RequestInit = {}) {
@@ -21,22 +24,38 @@ export class SheetService {
     const response = await fetch(url, { ...options, headers });
     if (!response.ok) {
       const error = await response.json();
+      if (response.status === 401) {
+        this.onTokenExpired?.();
+        throw new Error('Session expired. Please sign in again.');
+      }
       throw new Error(error.error?.message || 'API request failed');
     }
     return response.json();
   }
 
   async init(): Promise<boolean> {
-    // 1. Search for existing spreadsheet
+    // Idempotency: if already initializing or initialized, return existing result
+    if (this.spreadsheetId) return true;
+    if (this.initializing) return this.initializing;
+
+    this.initializing = this._doInit();
+    try {
+      return await this.initializing;
+    } finally {
+      this.initializing = null;
+    }
+  }
+
+  private async _doInit(): Promise<boolean> {
     const query = `name = '${SPREADSHEET_TITLE}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
     const searchResult = await this.fetch(`${DRIVE_API_BASE}?q=${encodeURIComponent(query)}`);
 
     if (searchResult.files && searchResult.files.length > 0) {
       this.spreadsheetId = searchResult.files[0].id;
-      return true; // Found
+      return true;
     } else {
       await this.createSpreadsheet();
-      return false; // Created new
+      return false;
     }
   }
 
@@ -136,48 +155,49 @@ export class SheetService {
   }
 
   async saveLogs(logs: MealLog[]) {
-    // For simplicity and to handle edits/deletes, we overwrite the log sheet.
-    // In a production app with huge data, we would append or update specific rows.
-    // We clear the sheet first or just overwrite.
-    // Note: This approach assumes < 2000 logs which is fine for personal use.
-
-    // 1. Clear existing logs (optional but safer for deletes) - simpler to just overwrite a large range
-    // but Sheets API overwrite doesn't clear 'remaining' rows if new list is shorter.
-    // So we clear first.
     if (!this.spreadsheetId) return;
 
-    const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Logs!A2:I:clear`;
-    await this.fetch(clearUrl, { method: 'POST' });
-
-    // 2. Write new logs
-    // Sort chronologically for sheet (logs passed in might be reverse chrono)
-    // We use string comparison for robustness (Timezone Agnostic)
+    // Sort chronologically
     const sortedLogs = [...logs].sort((a, b) => {
       const dateA = a.date + a.time;
       const dateB = b.date + b.time;
       return dateA.localeCompare(dateB);
     });
 
-    if (sortedLogs.length === 0) return;
+    if (sortedLogs.length === 0) {
+      // Only clear if there's nothing to write
+      const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Logs!A2:I:clear`;
+      await this.fetch(clearUrl, { method: 'POST' });
+      return;
+    }
 
     const rows = sortedLogs.map(l => [
       l.id, l.date, l.time, l.type, l.description, l.calories, l.protein, l.carbs, l.fat
     ]);
 
+    // Write new data first (atomic overwrite of the range we need)
     await this.writeRange(`Logs!A2:I${2 + rows.length - 1}`, rows);
+
+    // Then clear any leftover rows beyond our data
+    const clearRemainingUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Logs!A${2 + rows.length}:I:clear`;
+    await this.fetch(clearRemainingUrl, { method: 'POST' });
   }
 
   async saveWeight(history: WeightLog[]) {
     if (!this.spreadsheetId) return;
-    const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Weight!A2:B:clear`;
-    await this.fetch(clearUrl, { method: 'POST' });
 
-    if (history.length === 0) return;
+    if (history.length === 0) {
+      const clearUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Weight!A2:B:clear`;
+      await this.fetch(clearUrl, { method: 'POST' });
+      return;
+    }
 
-    // Ensure history is sorted by date string before saving
     const sortedHistory = [...history].sort((a, b) => a.date.localeCompare(b.date));
-
     const rows = sortedHistory.map(w => [w.date, w.weight]);
+
+    // Write first, then clear remaining rows
     await this.writeRange(`Weight!A2:B${2 + rows.length - 1}`, rows);
+    const clearRemainingUrl = `${SHEETS_API_BASE}/${this.spreadsheetId}/values/Weight!A${2 + rows.length}:B:clear`;
+    await this.fetch(clearRemainingUrl, { method: 'POST' });
   }
 }

@@ -32,9 +32,8 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Pull these secrets from Repository Settings > Secrets and variables > Actions
-          API_KEY: ${{ secrets.API_KEY }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_API_KEY: ${{ secrets.API_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
