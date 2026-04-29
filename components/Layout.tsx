@@ -8,10 +8,12 @@ interface LayoutProps {
   user?: UserProfile | null;
   logs?: MealLog[];
   weightHistory?: WeightLog[];
+  syncStatus?: 'idle' | 'syncing' | 'synced' | 'error';
+  lastSyncedAt?: Date | null;
   onLogout: () => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, userName, user, logs = [], weightHistory = [], onLogout }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, userName, user, logs = [], weightHistory = [], syncStatus = 'idle', lastSyncedAt = null, onLogout }) => {
   const [showProfile, setShowProfile] = useState(false);
   const profileStats = useMemo(() => {
     const loggedDays = new Set(logs.map(log => log.date)).size;
@@ -20,6 +22,28 @@ export const Layout: React.FC<LayoutProps> = ({ children, userName, user, logs =
     const averageCalories = loggedDays > 0 ? Math.round(totalCalories / loggedDays) : 0;
     return { loggedDays, latestWeight, averageCalories };
   }, [logs, user?.weight, weightHistory]);
+
+  const syncLabel = useMemo(() => {
+    if (syncStatus === 'syncing') return 'Syncing…';
+    if (syncStatus === 'error') return 'Sync failed';
+    if (syncStatus === 'synced') {
+      if (!lastSyncedAt) return 'Synced';
+      const diffMs = Date.now() - lastSyncedAt.getTime();
+      const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+      if (diffMinutes < 1) return 'Synced just now';
+      if (diffMinutes === 1) return 'Synced 1 min ago';
+      return `Synced ${diffMinutes} mins ago`;
+    }
+    return 'Not synced yet';
+  }, [lastSyncedAt, syncStatus]);
+
+  const syncClass = syncStatus === 'error'
+    ? 'bg-red-50 text-red-600 border-red-100'
+    : syncStatus === 'syncing'
+      ? 'bg-blue-50 text-blue-600 border-blue-100'
+      : syncStatus === 'synced'
+        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+        : 'bg-slate-50 text-slate-500 border-slate-200';
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-['Inter']">
@@ -31,6 +55,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, userName, user, logs =
           </div>
           {userName && (
             <div className="relative flex items-center gap-3">
+              <div className={`hidden md:inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold ${syncClass}`} title={syncLabel}>
+                <span className={`h-2 w-2 rounded-full ${syncStatus === 'error' ? 'bg-red-500' : syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : syncStatus === 'synced' ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                {syncLabel}
+              </div>
               <button
                 onClick={() => setShowProfile(prev => !prev)}
                 className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-2 shadow-sm transition hover:bg-slate-50"

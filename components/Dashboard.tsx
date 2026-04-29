@@ -405,6 +405,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const remainingCalories = user.targetCalories - totalCalories;
   const calorieProgress = Math.min((totalCalories / user.targetCalories) * 100, 100);
   const latestWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight : user.weight;
+  const weeklyStats = useMemo(() => {
+    const weekStart = getSingaporePastDate(6);
+    const weekLogs = logs.filter(log => log.date >= weekStart && log.date <= today);
+    const weekDays = new Set(weekLogs.map(log => log.date));
+    const totalWeekCalories = weekLogs.reduce((sum, log) => sum + log.calories, 0);
+    const totalWeekProtein = weekLogs.reduce((sum, log) => sum + log.protein, 0);
+    const loggedDays = weekDays.size;
+    const averageCalories = loggedDays > 0 ? Math.round(totalWeekCalories / loggedDays) : 0;
+    const averageProtein = loggedDays > 0 ? Math.round(totalWeekProtein / loggedDays) : 0;
+    const weeklyDeficit = Array.from(weekDays).reduce((sum, date) => {
+      const dailyCalories = weekLogs.filter(log => log.date === date).reduce((daySum, log) => daySum + log.calories, 0);
+      return sum + (userTDEE - dailyCalories);
+    }, 0);
+    const weekWeights = weightHistory.filter(entry => entry.date >= weekStart && entry.date <= today).sort((a, b) => a.date.localeCompare(b.date));
+    const weightChange = weekWeights.length >= 2 ? Number((weekWeights[weekWeights.length - 1].weight - weekWeights[0].weight).toFixed(1)) : null;
+
+    return {
+      loggedDays,
+      mealCount: weekLogs.length,
+      averageCalories,
+      averageProtein,
+      weeklyDeficit,
+      weightChange,
+    };
+  }, [logs, today, userTDEE, weightHistory]);
   const macroSummary = [
     { label: 'Calories', value: totalCalories, target: user.targetCalories, unit: 'kcal', text: 'text-emerald-700', bar: 'bg-emerald-500', soft: 'bg-emerald-50', icon: <EnergyIcon className="w-5 h-5" /> },
     { label: 'Protein', value: totalProtein, target: user.targetProtein, unit: 'g', text: 'text-blue-700', bar: 'bg-blue-500', soft: 'bg-blue-50', icon: <ProteinIcon className="w-5 h-5" /> },
@@ -465,6 +490,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               + Log meal
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Weekly Summary */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 animate-slideUp delay-75">
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700"><EnergyIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">7-day avg</p>
+          <p className="mt-1 text-xl font-extrabold text-slate-950">{weeklyStats.averageCalories}<span className="text-xs text-slate-500"> kcal</span></p>
+        </div>
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"><ProteinIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Protein avg</p>
+          <p className="mt-1 text-xl font-extrabold text-slate-950">{weeklyStats.averageProtein}<span className="text-xs text-slate-500">g</span></p>
+        </div>
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-teal-50 text-teal-700"><ZapIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Weekly balance</p>
+          <p className={`mt-1 text-xl font-extrabold ${weeklyStats.weeklyDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>{weeklyStats.weeklyDeficit > 0 ? '+' : ''}{weeklyStats.weeklyDeficit}</p>
+        </div>
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-purple-50 text-purple-700"><MealIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Meals logged</p>
+          <p className="mt-1 text-xl font-extrabold text-slate-950">{weeklyStats.mealCount}</p>
+        </div>
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-orange-50 text-orange-700"><SparklesIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Logged days</p>
+          <p className="mt-1 text-xl font-extrabold text-slate-950">{weeklyStats.loggedDays}<span className="text-xs text-slate-500">/7</span></p>
+        </div>
+        <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-slate-700"><FatIcon className="w-4 h-4" /></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Weight change</p>
+          <p className={`mt-1 text-xl font-extrabold ${weeklyStats.weightChange === null ? 'text-slate-950' : weeklyStats.weightChange > 0 ? 'text-orange-600' : weeklyStats.weightChange < 0 ? 'text-emerald-600' : 'text-slate-950'}`}>{weeklyStats.weightChange === null ? '—' : `${weeklyStats.weightChange > 0 ? '+' : ''}${weeklyStats.weightChange}`}<span className="text-xs text-slate-500">kg</span></p>
         </div>
       </section>
 

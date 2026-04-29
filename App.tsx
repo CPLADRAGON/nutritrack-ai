@@ -8,9 +8,12 @@ import { AppState, MealLog, UserProfile, WeightLog } from './types';
 import { SheetService } from './services/sheetService';
 
 type ViewState = 'LOGIN' | 'LOADING_DATA' | 'SETUP' | 'DASHBOARD';
+type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('LOGIN');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [state, setState] = useState<AppState>({
     currentUser: null,
     logs: [],
@@ -21,6 +24,7 @@ const App: React.FC = () => {
 
   const handleTokenExpired = useCallback(() => {
     alert('Your session has expired. Please sign in again.');
+    setSyncStatus('error');
     setState({ currentUser: null, logs: [], weightHistory: [] });
     sheetServiceRef.current = null;
     setView('LOGIN');
@@ -28,6 +32,7 @@ const App: React.FC = () => {
 
   const handleLoginSuccess = async (token: string) => {
     setView('LOADING_DATA');
+    setSyncStatus('syncing');
     sheetServiceRef.current = new SheetService(token, handleTokenExpired);
     
     try {
@@ -40,12 +45,16 @@ const App: React.FC = () => {
           logs: data.logs,
           weightHistory: data.weight
         });
+        setLastSyncedAt(new Date());
+        setSyncStatus('synced');
         setView('DASHBOARD');
       } else {
+        setSyncStatus('idle');
         setView('SETUP');
       }
     } catch (error) {
       console.error("Failed to load data", error);
+      setSyncStatus('error');
       alert("Failed to access Google Sheets. Please check permissions and try again.");
       setView('LOGIN');
     }
@@ -59,9 +68,13 @@ const App: React.FC = () => {
     // Async Save
     if (sheetServiceRef.current) {
       try {
+        setSyncStatus('syncing');
         await sheetServiceRef.current.saveUser(user);
+        setLastSyncedAt(new Date());
+        setSyncStatus('synced');
       } catch (e) {
         console.error("Failed to save profile", e);
+        setSyncStatus('error');
         alert("Warning: Could not save profile to cloud.");
       }
     }
@@ -71,9 +84,13 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, currentUser: user }));
     if (sheetServiceRef.current) {
       try {
+        setSyncStatus('syncing');
         await sheetServiceRef.current.saveUser(user);
+        setLastSyncedAt(new Date());
+        setSyncStatus('synced');
       } catch (e) {
         console.error("Failed to save user update", e);
+        setSyncStatus('error');
       }
     }
   };
@@ -82,9 +99,13 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, logs }));
     if (sheetServiceRef.current) {
       try {
+        setSyncStatus('syncing');
         await sheetServiceRef.current.saveLogs(logs);
+        setLastSyncedAt(new Date());
+        setSyncStatus('synced');
       } catch (e) {
         console.error("Failed to save logs", e);
+        setSyncStatus('error');
       }
     }
   };
@@ -93,15 +114,21 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, weightHistory: history }));
     if (sheetServiceRef.current) {
       try {
+        setSyncStatus('syncing');
         await sheetServiceRef.current.saveWeight(history);
+        setLastSyncedAt(new Date());
+        setSyncStatus('synced');
       } catch (e) {
         console.error("Failed to save weight", e);
+        setSyncStatus('error');
       }
     }
   };
 
   const handleLogout = () => {
     setState({ currentUser: null, logs: [], weightHistory: [] });
+    setSyncStatus('idle');
+    setLastSyncedAt(null);
     sheetServiceRef.current = null;
     setView('LOGIN');
   };
@@ -124,6 +151,8 @@ const App: React.FC = () => {
         user={state.currentUser}
         logs={state.logs}
         weightHistory={state.weightHistory}
+        syncStatus={syncStatus}
+        lastSyncedAt={lastSyncedAt}
         onLogout={handleLogout}
       >
         {view === 'SETUP' ? (
