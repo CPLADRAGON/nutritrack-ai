@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { UserProfile, MealLog, WeightLog, MealType } from '../types';
+import { UserProfile, MealLog, WeightLog, MealType, GoalType } from '../types';
 import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  LineChart, Line
+  LineChart, Line, ReferenceLine
 } from 'recharts';
 import {
   BotIcon,
@@ -79,6 +79,24 @@ const FormattedAiAdvice: React.FC<{ text: string }> = ({ text }) => {
 
   flushList();
   return <div className="space-y-1">{blocks}</div>;
+};
+
+const KCAL_PER_KG = 7700;
+
+const getDeficitContext = (goal: GoalType) => {
+  switch (goal) {
+    case GoalType.LOSE_WEIGHT:
+      return { label: 'Deficit', goodColor: 'text-teal-600', badColor: 'text-red-500', isGood: (v: number) => v >= 0 };
+    case GoalType.GAIN_MUSCLE:
+      return { label: 'Surplus', goodColor: 'text-teal-600', badColor: 'text-orange-500', isGood: (v: number) => v <= 0 };
+    case GoalType.MAINTAIN:
+      return { label: 'Balance', goodColor: 'text-teal-600', badColor: 'text-amber-500', isGood: (v: number) => Math.abs(v) <= 100 };
+  }
+};
+
+const formatDeficit = (value: number, ctx: ReturnType<typeof getDeficitContext>) => {
+  const prefix = ctx.label === 'Surplus' ? (value <= 0 ? '+' : '') : (value >= 0 ? '+' : '');
+  return `${prefix}${Math.abs(value)}`;
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory, onUpdateUser, onUpdateLogs, onUpdateWeight }) => {
@@ -161,6 +179,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     return deficit;
   }, [allLogsByDate, userTDEE]);
 
+  const deficitCtx = useMemo(() => getDeficitContext(user.goal), [user.goal]);
+  const estimatedWeightDelta = totalDeficit / KCAL_PER_KG;
 
   useEffect(() => {
     getDailyAdvice(user, logs).then(setAiAdvice);
@@ -476,8 +496,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Deficit today</p>
-              <p className={`mt-2 text-2xl font-extrabold ${todayDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>{todayDeficit > 0 ? '+' : ''}{todayDeficit}</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{deficitCtx.label} today</p>
+              <p className={`mt-2 text-2xl font-extrabold ${deficitCtx.isGood(todayDeficit) ? deficitCtx.goodColor : deficitCtx.badColor}`}>{formatDeficit(todayDeficit, deficitCtx)}</p>
+              {logs.length > 0 && (
+                <>
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <p className="text-xs text-slate-400 mb-0.5">All-time {deficitCtx.label.toLowerCase()}</p>
+                    <p className={`text-lg font-bold ${deficitCtx.isGood(totalDeficit) ? deficitCtx.goodColor : deficitCtx.badColor}`}>{formatDeficit(totalDeficit, deficitCtx)}</p>
+                  </div>
+                  {user.goal !== GoalType.MAINTAIN && (
+                    <p className="mt-1 text-xs font-semibold text-slate-400">
+                      &asymp; {Math.abs(estimatedWeightDelta).toFixed(1)} kg {estimatedWeightDelta >= 0 ? 'lost' : 'gained'}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
             <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Current weight</p>
@@ -507,8 +540,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         </div>
         <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-teal-50 text-teal-700"><ZapIcon className="w-4 h-4" /></div>
-          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Weekly balance</p>
-          <p className={`mt-1 text-xl font-extrabold ${weeklyStats.weeklyDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>{weeklyStats.weeklyDeficit > 0 ? '+' : ''}{weeklyStats.weeklyDeficit}</p>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Weekly {deficitCtx.label.toLowerCase()}</p>
+          <p className={`mt-1 text-xl font-extrabold ${deficitCtx.isGood(weeklyStats.weeklyDeficit) ? deficitCtx.goodColor : deficitCtx.badColor}`}>{formatDeficit(weeklyStats.weeklyDeficit, deficitCtx)}</p>
         </div>
         <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-purple-50 text-purple-700"><MealIcon className="w-4 h-4" /></div>
@@ -566,91 +599,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             </div>
           );
         })}
-      </div>
-
-      <div className="hidden">
-        {/* Calories Card */}
-        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCalories > user.targetCalories ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
-          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCalories > user.targetCalories ? 'bg-red-100' : 'bg-emerald-100'}`}></div>
-          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-500'}`}>
-            Calories {totalCalories > user.targetCalories && '(over)'}
-          </h3>
-          <div className="flex items-end mt-3 relative z-10">
-            <span className={`text-3xl font-extrabold tracking-tight ${totalCalories > user.targetCalories ? 'text-red-600' : 'text-gray-900'}`}>
-              {totalCalories}
-            </span>
-            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCalories}</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-1000 ${totalCalories > user.targetCalories ? 'bg-red-500' : 'bg-gradient-to-r from-emerald-400 to-emerald-600'}`} style={{ width: `${Math.min((totalCalories / user.targetCalories) * 100, 100)}%` }}></div>
-          </div>
-        </div>
-
-        {/* Protein Card */}
-        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalProtein > user.targetProtein ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
-          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalProtein > user.targetProtein ? 'bg-red-100' : 'bg-blue-100'}`}></div>
-          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalProtein > user.targetProtein ? 'text-red-600' : 'text-gray-500'}`}>
-            Protein {totalProtein > user.targetProtein && '(over)'}
-          </h3>
-          <div className="flex items-end mt-3 relative z-10">
-            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalProtein}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetProtein}g</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-1000 ${totalProtein > user.targetProtein ? 'bg-red-500' : 'bg-gradient-to-r from-blue-400 to-blue-600'}`} style={{ width: `${Math.min((totalProtein / user.targetProtein) * 100, 100)}%` }}></div>
-          </div>
-        </div>
-
-        {/* Carbs Card */}
-        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalCarbs > user.targetCarbs ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
-          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalCarbs > user.targetCarbs ? 'bg-red-100' : 'bg-orange-100'}`}></div>
-          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalCarbs > user.targetCarbs ? 'text-red-600' : 'text-gray-500'}`}>
-            Carbs {totalCarbs > user.targetCarbs && '(over)'}
-          </h3>
-          <div className="flex items-end mt-3 relative z-10">
-            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalCarbs}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetCarbs}g</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-1000 ${totalCarbs > user.targetCarbs ? 'bg-red-500' : 'bg-gradient-to-r from-orange-400 to-orange-600'}`} style={{ width: `${Math.min((totalCarbs / user.targetCarbs) * 100, 100)}%` }}></div>
-          </div>
-        </div>
-
-        {/* Fat Card */}
-        <div className={`p-6 rounded-2xl shadow-sm border relative overflow-hidden group transition-all ${totalFat > user.targetFat ? 'bg-red-50 border-red-200 ring-2 ring-red-100' : 'bg-white border-gray-100 hover:shadow-md'}`}>
-          <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform ${totalFat > user.targetFat ? 'bg-red-100' : 'bg-purple-100'}`}></div>
-          <h3 className={`text-xs font-bold uppercase tracking-wider relative z-10 ${totalFat > user.targetFat ? 'text-red-600' : 'text-gray-500'}`}>
-            Fat {totalFat > user.targetFat && '(over)'}
-          </h3>
-          <div className="flex items-end mt-3 relative z-10">
-            <span className="text-3xl font-extrabold text-gray-900 tracking-tight">{totalFat}g</span>
-            <span className="text-gray-400 text-sm ml-2 mb-1.5 font-medium">/ {user.targetFat}g</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-1000 ${totalFat > user.targetFat ? 'bg-red-500' : 'bg-gradient-to-r from-purple-400 to-purple-600'}`} style={{ width: `${Math.min((totalFat / user.targetFat) * 100, 100)}%` }}></div>
-          </div>
-        </div>
-
-        {/* Deficit Card */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-all flex flex-col justify-between">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-teal-100 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
-          <div>
-            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider relative z-10">Calorie Deficit</h3>
-            <div className="mt-2 relative z-10">
-              <p className="text-xs text-gray-400 mb-0.5">Today</p>
-              <span className={`text-2xl font-extrabold tracking-tight ${todayDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>
-                {todayDeficit > 0 ? '+' : ''}{todayDeficit}
-              </span>
-            </div>
-          </div>
-          <div className="mt-2 relative z-10 border-t pt-2 border-gray-100">
-            <p className="text-xs text-gray-400 mb-0.5">Total All-Time</p>
-            <span className={`text-lg font-bold tracking-tight ${totalDeficit < 0 ? 'text-red-500' : 'text-teal-600'}`}>
-              {totalDeficit > 0 ? '+' : ''}{totalDeficit}
-            </span>
-          </div>
-        </div>
-
       </div>
 
       {/* AI Advice Banner */}
@@ -726,6 +674,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                     labelStyle={{ color: '#9ca3af', marginBottom: '8px', fontSize: '12px' }}
                   />
                   <Bar dataKey="cals" fill="url(#colorCals)" radius={[6, 6, 0, 0]} name="Calories" barSize={24} />
+                  <ReferenceLine y={userTDEE} stroke="#14b8a6" strokeDasharray="6 4" strokeWidth={2} label={{ value: `TDEE ${userTDEE}`, position: 'right', fill: '#14b8a6', fontSize: 11, fontWeight: 700 }} />
                   <defs>
                     <linearGradient id="colorCals" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#10b981" stopOpacity={0.8} />
