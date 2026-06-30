@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { UserProfile, MealLog, WeightLog, MealType, GoalType, WeekComparison, WeightTrend } from '../types';
+import { UserProfile, MealLog, WeightLog, MealType, GoalType, ActivityLevel, WeekComparison, WeightTrend } from '../types';
 import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import { getMovingAverage, getWeekComparison, getWeightTrend } from '../utils/weightCalculations';
@@ -103,9 +103,8 @@ const formatDeficit = (value: number, ctx: ReturnType<typeof getDeficitContext>)
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory, onUpdateUser, onUpdateLogs, onUpdateWeight }) => {
   const [showLogModal, setShowLogModal] = useState(false);
-  const [showGoalsModal, setShowGoalsModal] = useState(false);
+  const [showNutritionModal, setShowNutritionModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
-  const [showTDEEModal, setShowTDEEModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showAllJournal, setShowAllJournal] = useState(false);
   const INITIAL_DATE_COUNT = 3;
@@ -123,20 +122,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Track last TDEE-sensitive fields to avoid recalc loops
-  const lastProfileSig = useRef<string>('');
-
-  // Goals Edit State
-  const [editGoals, setEditGoals] = useState({
+  // Nutrition Plan Form State (merged goal + activity + TDEE + macros)
+  const [nutritionForm, setNutritionForm] = useState({
+    goal: user.goal,
+    activityLevel: user.activityLevel,
+    tdee: user.tdee || calculateTDEE(user.weight, user.height, user.age, user.gender as 'MALE' | 'FEMALE', user.activityLevel),
     calories: user.targetCalories,
     protein: user.targetProtein,
     carbs: user.targetCarbs,
     fat: user.targetFat,
-    goal: user.goal,
   });
-
-  // TDEE State
-  const [newTDEE, setNewTDEE] = useState<number>(user.tdee || 2000);
 
   // Log Analysis Inputs
   const [foodDescriptionInput, setFoodDescriptionInput] = useState('');
@@ -205,14 +200,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       if (e.key === 'Escape') {
         if (deleteConfirmId) setDeleteConfirmId(null);
         else if (showLogModal) closeLogModal();
-        else if (showGoalsModal) setShowGoalsModal(false);
+        else if (showNutritionModal) setShowNutritionModal(false);
         else if (showWeightModal) setShowWeightModal(false);
-        else if (showTDEEModal) setShowTDEEModal(false);
       }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [showLogModal, showGoalsModal, showWeightModal, showTDEEModal, deleteConfirmId]);
+  }, [showLogModal, showNutritionModal, showWeightModal, deleteConfirmId]);
 
   // Toast auto-dismiss
   useEffect(() => {
@@ -221,46 +215,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     toastTimerRef.current = setTimeout(() => setToast(null), 4500);
     return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); };
   }, [toast]);
-
-  // Auto-recalculate TDEE when sensitive profile fields change
-  useEffect(() => {
-    const sig = `${user.weight}-${user.activityLevel}-${user.goal}-${user.height}-${user.age}-${user.gender}`;
-    if (sig === lastProfileSig.current) return;
-    lastProfileSig.current = sig;
-
-    const newTDEE = calculateTDEE(
-      user.weight, user.height, user.age,
-      user.gender as 'MALE' | 'FEMALE',
-      user.activityLevel,
-    );
-
-    const macros = calculateMacros(newTDEE, user.weight, user.goal);
-    const tdeeChanged = Math.abs(newTDEE - user.tdee) > 10;
-    const macrosChanged = macros.targetCalories !== user.targetCalories;
-
-    if (tdeeChanged) {
-      setToast({
-        message: `TDEE recalculated to ${newTDEE} kcal based on your updated profile`,
-        type: 'info',
-      });
-    } else if (macrosChanged) {
-      setToast({
-        message: `Macros adjusted for ${user.goal.replace('_', ' ').toLowerCase()} goal`,
-        type: 'info',
-      });
-    }
-
-    if (tdeeChanged || macrosChanged) {
-      onUpdateUser({
-        ...user,
-        tdee: newTDEE,
-        targetCalories: macros.targetCalories,
-        targetProtein: macros.targetProtein,
-        targetCarbs: macros.targetCarbs,
-        targetFat: macros.targetFat,
-      });
-    }
-  }, [user.weight, user.activityLevel, user.goal, user.height, user.age, user.gender]);
 
   const handleGetSuggestion = async () => {
     setIsSuggesting(true);
@@ -281,11 +235,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     }
   };
 
-  const handleCalculateTDEE = async () => {
+  const handleRecalcWithAI = async () => {
     setIsCalculatingTDEE(true);
     try {
-      const plan = await generatePlanFromProfile(user);
-      setNewTDEE(plan.tdee);
+      const plan = await generatePlanFromProfile({
+        ...user,
+        activityLevel: nutritionForm.activityLevel as any,
+        goal: nutritionForm.goal as any,
+      });
+      const newTDEE = plan.tdee;
+      const macros = calculateMacros(newTDEE, user.weight, nutritionForm.goal as any);
+      setNutritionForm(prev => ({ ...prev, tdee: newTDEE, ...macros }));
     } catch (e) {
       alert("Could not calculate TDEE automatically.");
     } finally {
@@ -293,9 +253,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     }
   };
 
-  const handleSaveTDEE = () => {
-    onUpdateUser({ ...user, tdee: Number(newTDEE) });
-    setShowTDEEModal(false);
+  const handleSaveNutritionPlan = () => {
+    const updatedUser = {
+      ...user,
+      goal: nutritionForm.goal as GoalType,
+      activityLevel: nutritionForm.activityLevel as any,
+      tdee: nutritionForm.tdee,
+      targetCalories: nutritionForm.calories,
+      targetProtein: nutritionForm.protein,
+      targetCarbs: nutritionForm.carbs,
+      targetFat: nutritionForm.fat,
+    };
+    onUpdateUser(updatedUser);
+    setShowNutritionModal(false);
+    setToast({ message: 'Nutrition plan updated', type: 'success' });
+  };
+
+  const handleGoalChange = (goal: GoalType) => {
+    const macros = calculateMacros(nutritionForm.tdee, user.weight, goal);
+    setNutritionForm(prev => ({ ...prev, goal, ...macros }));
+  };
+
+  const handleActivityChange = (activity: string) => {
+    const newTDEE = calculateTDEE(user.weight, user.height, user.age, user.gender as 'MALE' | 'FEMALE', activity as any);
+    const macros = calculateMacros(newTDEE, user.weight, nutritionForm.goal as any);
+    setNutritionForm(prev => ({ ...prev, activityLevel: activity as any, tdee: newTDEE, ...macros }));
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -394,39 +376,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     setDeleteConfirmId(null);
   }, [deleteConfirmId, logs, onUpdateLogs]);
 
-  const handleUpdateGoals = () => {
-    const cals = Number(editGoals.calories);
-    const protein = Number(editGoals.protein);
-    const carbs = Number(editGoals.carbs);
-    const fat = Number(editGoals.fat);
-
-    if (cals <= 0 || protein < 0 || carbs < 0 || fat < 0) {
-      alert('Please enter valid positive values for all nutrition goals.');
-      return;
-    }
-    if (cals > 10000) {
-      alert('Calorie target seems unreasonably high. Please double-check.');
-      return;
-    }
-
-    const goalChanged = editGoals.goal !== user.goal;
-    const updatedUser = {
-      ...user,
-      targetCalories: cals,
-      targetProtein: protein,
-      targetCarbs: carbs,
-      targetFat: fat,
-      goal: editGoals.goal as GoalType,
-    };
-    onUpdateUser(updatedUser);
-
-    // If the goal changed, the auto-TDEE effect will recalculate macros — sync state
-    if (goalChanged) {
-      setEditGoals(prev => ({ ...prev, goal: editGoals.goal as GoalType }));
-    }
-    setShowGoalsModal(false);
-  };
-
   const handleSaveWeight = () => {
     const weightVal = Number(newWeightLog.weight);
     if (!weightVal || weightVal <= 0) return;
@@ -445,12 +394,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     updatedHistory.sort((a, b) => a.date.localeCompare(b.date));
     onUpdateWeight(updatedHistory);
 
-    // 2. Update User Profile Current Weight 
+    // 2. Update User Profile Current Weight + recalculate TDEE & macros
     const isLatestDate = newWeightLog.date >= today;
     const lastHistoryDate = updatedHistory[updatedHistory.length - 1].date;
 
     if (isLatestDate || lastHistoryDate === newWeightLog.date) {
-      onUpdateUser({ ...user, weight: weightVal });
+      const newTDEE = calculateTDEE(weightVal, user.height, user.age, user.gender as 'MALE' | 'FEMALE', user.activityLevel);
+      const macros = calculateMacros(newTDEE, weightVal, user.goal);
+      onUpdateUser({
+        ...user,
+        weight: weightVal,
+        tdee: newTDEE,
+        targetCalories: macros.targetCalories,
+        targetProtein: macros.targetProtein,
+        targetCarbs: macros.targetCarbs,
+        targetFat: macros.targetFat,
+      });
+      setToast({
+        message: `TDEE recalculated to ${newTDEE} kcal based on updated weight`,
+        type: 'info',
+      });
     }
 
     setShowWeightModal(false);
@@ -640,9 +603,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
           <h2 className="text-xl font-bold text-slate-900">Macro Progress</h2>
           <p className="text-sm text-slate-500">Clear daily targets with nutrition-specific colors.</p>
         </div>
-        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-bold flex items-center bg-emerald-50 px-3 py-2 rounded-full transition-colors border border-emerald-100">
+        <button onClick={() => setShowNutritionModal(true)} className="text-sm text-primary hover:text-emerald-700 font-bold flex items-center bg-emerald-50 px-3 py-2 rounded-full transition-colors border border-emerald-100">
           <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-          Edit Goals
+          Nutrition Plan
         </button>
       </div>
 
@@ -815,11 +778,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             </h3>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowTDEEModal(true)}
+                onClick={() => setShowNutritionModal(true)}
                 className="text-xs bg-purple-50 text-purple-600 px-3 py-2 rounded-full hover:bg-purple-100 transition font-bold border border-purple-100"
-                title="Update TDEE"
+                title="Update TDEE, goal, or activity"
               >
-                <ZapIcon className="mr-1 inline h-3.5 w-3.5" /> TDEE
+                <ZapIcon className="mr-1 inline h-3.5 w-3.5" /> Plan
               </button>
               <button
                 onClick={() => setShowWeightModal(true)}
@@ -1009,110 +972,90 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         </div>
       </div>
 
-      {/* TDEE Update Modal */}
-      {showTDEEModal && (
+      {/* Nutrition Plan Modal */}
+      {showNutritionModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowTDEEModal(false)}></div>
+            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowNutritionModal(false)}></div>
             <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full animate-scaleIn">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6 flex items-center gap-2">
-                  <ZapIcon className="w-5 h-5 text-purple-600" /> Update TDEE
+                  <ZapIcon className="w-5 h-5 text-purple-600" /> Nutrition Plan
                 </h3>
-                <p className="text-sm text-gray-500 mb-4">Total Daily Energy Expenditure is the number of calories you burn daily. This acts as your maintenance baseline.</p>
 
-                <div className="space-y-4">
-                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex flex-col gap-2">
-                    <label className="block text-sm font-bold text-purple-900">Calculated TDEE (kcal)</label>
-                    <input
-                      type="number"
-                      className="w-full bg-white border border-purple-200 rounded-lg p-3 text-lg font-bold text-purple-900 text-center focus:ring-2 focus:ring-purple-500 outline-none"
-                      value={newTDEE}
-                      onChange={e => setNewTDEE(Number(e.target.value))}
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleCalculateTDEE}
-                    disabled={isCalculatingTDEE}
-                    className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none transition-colors"
-                  >
-                    {isCalculatingTDEE ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-purple-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Recalculate with AI
-                      </>
-                    ) : (
-                      <>
-                        <SparklesIcon className="w-4 h-4" /> Recalculate based on Profile
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button type="button" onClick={handleSaveTDEE} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
-                  Update TDEE
-                </button>
-                <button type="button" onClick={() => setShowTDEEModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Goals Modal */}
-      {showGoalsModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-900/40 transition-opacity backdrop-blur-sm" onClick={() => setShowGoalsModal(false)}></div>
-            <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md w-full animate-scaleIn">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6">Adjust Nutrition Goals</h3>
-                <div className="space-y-4">
+                <div className="space-y-5">
+                  {/* Goal Selector */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Goal</label>
                     <select
-                      value={editGoals.goal}
-                      onChange={e => setEditGoals({ ...editGoals, goal: e.target.value as GoalType })}
+                      value={nutritionForm.goal}
+                      onChange={e => handleGoalChange(e.target.value as GoalType)}
                       className={inputClass}>
                       {Object.values(GoalType).map(g => (
                         <option key={g} value={g}>{g.replace('_', ' ')}</option>
                       ))}
                     </select>
                     <p className="text-xs text-gray-400 mt-1">
-                      {editGoals.goal === GoalType.LOSE_WEIGHT ? 'TDEE − 500 kcal deficit for fat loss' :
-                       editGoals.goal === GoalType.GAIN_MUSCLE ? 'TDEE + 300 kcal surplus for muscle gain' :
+                      {nutritionForm.goal === GoalType.LOSE_WEIGHT ? 'TDEE − 500 kcal deficit for fat loss' :
+                       nutritionForm.goal === GoalType.GAIN_MUSCLE ? 'TDEE + 300 kcal surplus for muscle gain' :
                        'TDEE maintenance level'}
                     </p>
                   </div>
+
+                  {/* Activity Level */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Daily Calories (kcal)</label>
-                    <input type="number" min="1" max="10000" className={inputClass} value={editGoals.calories} onChange={e => setEditGoals({ ...editGoals, calories: Number(e.target.value) })} />
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Activity Level</label>
+                    <select
+                      value={nutritionForm.activityLevel}
+                      onChange={e => handleActivityChange(e.target.value)}
+                      className={inputClass}>
+                      {Object.values(ActivityLevel).map(a => (
+                        <option key={a} value={a}>{a.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Protein (g)</label>
-                      <input type="number" min="0" className={inputClass} value={editGoals.protein} onChange={e => setEditGoals({ ...editGoals, protein: Number(e.target.value) })} />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Carbs (g)</label>
-                      <input type="number" min="0" className={inputClass} value={editGoals.carbs} onChange={e => setEditGoals({ ...editGoals, carbs: Number(e.target.value) })} />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Fat (g)</label>
-                      <input type="number" min="0" className={inputClass} value={editGoals.fat} onChange={e => setEditGoals({ ...editGoals, fat: Number(e.target.value) })} />
+
+                  {/* Mifflin-St Jeor Calculation Summary */}
+                  <div className="bg-gradient-to-br from-emerald-50 to-blue-50 p-4 rounded-xl border border-emerald-100 space-y-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">Mifflin-St Jeor Calculation</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <span className="text-gray-500">TDEE (maintenance)</span>
+                      <span className="font-bold text-right text-gray-900">{nutritionForm.tdee} kcal</span>
+                      <span className="text-gray-500">Daily Target</span>
+                      <span className="font-bold text-right text-gray-900">{nutritionForm.calories} kcal</span>
+                      <span className="text-blue-600 font-semibold">Protein</span>
+                      <span className="font-bold text-right text-gray-900">{nutritionForm.protein} g</span>
+                      <span className="text-orange-600 font-semibold">Carbs</span>
+                      <span className="font-bold text-right text-gray-900">{nutritionForm.carbs} g</span>
+                      <span className="text-purple-600 font-semibold">Fat</span>
+                      <span className="font-bold text-right text-gray-900">{nutritionForm.fat} g</span>
                     </div>
                   </div>
+
+                  {/* Recalculate with AI */}
+                  <button
+                    onClick={handleRecalcWithAI}
+                    disabled={isCalculatingTDEE}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none transition-colors"
+                  >
+                    {isCalculatingTDEE ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-purple-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Recalculating...
+                      </>
+                    ) : (
+                      <>
+                        <SparklesIcon className="w-4 h-4" /> Recalculate with AI
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button type="button" onClick={handleUpdateGoals} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
-                  Update Goals
+                <button type="button" onClick={handleSaveNutritionPlan} className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-primary text-base font-medium text-white hover:bg-emerald-600 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm transition-colors">
+                  Save
                 </button>
-                <button type="button" onClick={() => setShowGoalsModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
+                <button type="button" onClick={() => setShowNutritionModal(false)} className="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-200 shadow-sm px-4 py-2.5 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
                   Cancel
                 </button>
               </div>
