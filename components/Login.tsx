@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { GOOGLE_CLIENT_ID } from '../config';
 import { AppLogo } from './Icons';
+import { storeToken, getStoredToken, isTokenValid } from '../utils/tokenStorage';
 
 declare global {
   interface Window {
@@ -14,18 +15,85 @@ interface LoginProps {
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [error, setError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(true);
+  const [isSilentRefreshing, setIsSilentRefreshing] = useState(false);
+  const attempted = useRef(false);
   const origin = window.location.origin;
 
   useEffect(() => {
-    // Check if user configured client ID
-    // We check for empty string, null, undefined, or the placeholder text
+    if (attempted.current) return;
+    attempted.current = true;
+
+    // 1. Fast path — stored token is still valid
+    if (isTokenValid()) {
+      const token = getStoredToken()!;
+      setIsRestoring(false);
+      onLoginSuccess(token.access_token);
+      return;
+    }
+
+    // 2. No valid stored token — check config
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.trim() === '' || GOOGLE_CLIENT_ID.includes('YOUR_CLIENT_ID')) {
       setError("Configuration Missing");
+      setIsRestoring(false);
+      return;
     }
-  }, []);
+
+    // 3. Try silent refresh (token exists but expired, or first time without a token)
+    if (window.google?.accounts?.oauth2) {
+      attemptSilentRefresh();
+    } else {
+      // GIS library not loaded yet — wait briefly then try again
+      setIsSilentRefreshing(true);
+    }
+  }, [onLoginSuccess]);
+
+  /** Attempt to get a token without showing any UI using prompt=none. */
+  const attemptSilentRefresh = () => {
+    if (!window.google?.accounts?.oauth2) {
+      setIsRestoring(false);
+      return;
+    }
+
+    setIsSilentRefreshing(true);
+
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+        callback: (response: any) => {
+          if (response.access_token) {
+            storeToken(response.access_token, response.expires_in);
+            setIsRestoring(false);
+            setIsSilentRefreshing(false);
+            onLoginSuccess(response.access_token);
+          } else {
+            setIsRestoring(false);
+            setIsSilentRefreshing(false);
+          }
+        },
+        error_callback: () => {
+          // Silent refresh failed → user needs to click sign-in
+          const stored = getStoredToken();
+          if (stored) {
+            setError("Session expired. Sign in again to continue.");
+          }
+          setIsRestoring(false);
+          setIsSilentRefreshing(false);
+        },
+      });
+
+      // This is the key: prompt=none silently returns a token if the grant still exists
+      client.requestAccessToken({ prompt: 'none' });
+    } catch (e) {
+      console.error('Silent refresh failed:', e);
+      setIsRestoring(false);
+      setIsSilentRefreshing(false);
+    }
+  };
 
   const handleGoogleLogin = () => {
-    if (error) return;
+    if (error && error !== "Session expired. Sign in again to continue.") return;
 
     if (!GOOGLE_CLIENT_ID) {
       setError("Configuration Missing");
@@ -43,6 +111,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
         callback: (response: any) => {
           if (response.access_token) {
+            storeToken(response.access_token, response.expires_in);
             onLoginSuccess(response.access_token);
           } else {
             setError("Failed to sign in. Please try again.");
@@ -56,6 +125,16 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       setError("Initialization Error: Client ID invalid.");
     }
   };
+
+  // While checking for a stored token or attempting silent refresh, show loading
+  if (isRestoring) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center text-primary text-xl flex-col gap-4">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <span>{isSilentRefreshing ? 'Restoring session...' : 'Loading...'}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-blue-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-['Inter']">

@@ -5,13 +5,22 @@ type IconProps = React.SVGProps<SVGSVGElement>;
 export const AppLogo: React.FC<IconProps> = ({ className = 'w-6 h-6', ...props }) => (
   <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden="true" {...props}>
     <rect width="48" height="48" rx="16" fill="url(#logoGradient)" />
-    <path d="M14 27.5C14 18.4 21.1 12 34 12c0 12.9-6.4 20-15.5 20H14v-4.5Z" fill="white" opacity="0.96" />
-    <path d="M18 30c4.9-6.2 9.6-10 15-12" stroke="#047857" strokeWidth="2.4" strokeLinecap="round" />
-    <path d="M15 35h18" stroke="white" strokeWidth="3" strokeLinecap="round" opacity="0.85" />
+    {/* Bowl */}
+    <path d="M8 20 L13 36 C13 39 18 42 24 42 C30 42 35 39 35 36 L40 20 Z" fill="white" fillOpacity="0.95" />
+    {/* Chopsticks */}
+    <line x1="30" y1="12" x2="26" y2="32" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
+    <line x1="34" y1="12" x2="30" y2="32" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
+    {/* Food: rice, protein, veggies */}
+    <ellipse cx="24" cy="28" rx="10" ry="6" fill="#fef3c7" opacity="0.95" />
+    <ellipse cx="20" cy="27" rx="5" ry="3.5" fill="#fca5a5" opacity="0.85" />
+    <circle cx="29" cy="29" r="3.5" fill="#86efac" opacity="0.85" />
+    <circle cx="18" cy="31" r="2" fill="#fdba74" opacity="0.9" />
+    {/* AI spark */}
+    <path d="M34 14 L35 17 L38 18 L35 19 L34 22 L33 19 L30 18 L33 17 Z" fill="#4f46e5" opacity="0.92" />
     <defs>
       <linearGradient id="logoGradient" x1="6" y1="5" x2="42" y2="44" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#34d399" />
-        <stop offset="1" stopColor="#0f766e" />
+        <stop stopColor="#10b981" />
+        <stop offset="1" stopColor="#047857" />
       </linearGradient>
     </defs>
   </svg>

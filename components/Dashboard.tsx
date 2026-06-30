@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { UserProfile, MealLog, WeightLog, MealType, GoalType } from '../types';
+import { UserProfile, MealLog, WeightLog, MealType, GoalType, WeekComparison, WeightTrend } from '../types';
 import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
+import { getMovingAverage, getWeekComparison, getWeightTrend } from '../utils/weightCalculations';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line, ReferenceLine
@@ -410,16 +411,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       }));
   }, [logsByDate, calorieRange]);
 
-  // Prepare Weight Chart Data
+  // Prepare Weight Chart Data (with moving average)
   const weightChartData = useMemo(() => {
     const weightCutoff = getSingaporePastDate(weightRange);
-    return weightHistory
-      .filter(w => w.date >= weightCutoff)
-      .map(w => ({
-        date: w.date.slice(5),
-        weight: w.weight
-      }));
+    const recentHistory = weightHistory.filter(w => w.date >= weightCutoff);
+    const withMA = getMovingAverage(recentHistory, 7);
+    return withMA.map(p => ({
+      date: p.date.slice(5),
+      weight: p.weight,
+      movingAvg: p.movingAvg,
+    }));
   }, [weightHistory, weightRange]);
+
+  // Week-over-week comparison
+  const weekComparison = useMemo<WeekComparison | null>(() => getWeekComparison(weightHistory), [weightHistory]);
+  // Current weight trend
+  const weightTrend = useMemo<WeightTrend>(() => getWeightTrend(weightHistory), [weightHistory]);
 
   const inputClass = "w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50 text-slate-900 focus:ring-2 focus:ring-primary focus:border-primary transition-all";
   const remainingCalories = user.targetCalories - totalCalories;
@@ -515,6 +522,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
             <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Current weight</p>
               <p className="mt-2 text-2xl font-extrabold text-slate-950">{latestWeight}<span className="text-sm text-slate-500">kg</span></p>
+              {weightTrend.weeklyRate !== null && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <p className="text-xs text-slate-400 mb-0.5">Trend</p>
+                  <p className={`text-lg font-bold ${weightTrend.direction === 'down' ? 'text-emerald-600' : weightTrend.direction === 'up' ? 'text-orange-600' : 'text-slate-500'}`}>
+                    {weightTrend.direction === 'down' ? '↓ ' : weightTrend.direction === 'up' ? '↑ ' : '→ '}
+                    {Math.abs(weightTrend.weeklyRate).toFixed(1)} kg/week
+                  </p>
+                </div>
+              )}
             </div>
             <button
               onClick={() => setShowLogModal(true)}
@@ -554,9 +570,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
           <p className="mt-1 text-xl font-extrabold text-slate-950">{weeklyStats.loggedDays}<span className="text-xs text-slate-500">/7</span></p>
         </div>
         <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-slate-700"><FatIcon className="w-4 h-4" /></div>
-          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Weight change</p>
-          <p className={`mt-1 text-xl font-extrabold ${weeklyStats.weightChange === null ? 'text-slate-950' : weeklyStats.weightChange > 0 ? 'text-orange-600' : weeklyStats.weightChange < 0 ? 'text-emerald-600' : 'text-slate-950'}`}>{weeklyStats.weightChange === null ? '—' : `${weeklyStats.weightChange > 0 ? '+' : ''}${weeklyStats.weightChange}`}<span className="text-xs text-slate-500">kg</span></p>
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M6 7l-3 6h6L6 7Z"/><path d="M18 7l-3 6h6l-3-6Z"/></svg></div>
+          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">Week avg</p>
+          {weekComparison ? (
+            <>
+              <p className="mt-1 text-xl font-extrabold text-slate-950">{weekComparison.currentAvg}<span className="text-xs text-slate-500">kg</span></p>
+              <p className={`mt-0.5 text-xs font-semibold ${weekComparison.delta <= -0.1 ? 'text-emerald-600' : weekComparison.delta >= 0.1 ? 'text-orange-600' : 'text-slate-400'}`}>
+                {weekComparison.delta > 0 ? '+' : ''}{weekComparison.delta} vs last week
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-xl font-extrabold text-slate-400">—</p>
+          )}
         </div>
       </section>
 
@@ -733,7 +758,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                     itemStyle={{ color: '#374151', fontWeight: 600 }}
                     labelStyle={{ color: '#9ca3af', marginBottom: '8px', fontSize: '12px' }}
                   />
-                  <Line type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }} name="Weight (kg)" />
+                  {/* 7-day moving average (trend line) */}
+                  <Line type="monotone" dataKey="movingAvg" stroke="#10b981" strokeWidth={4} dot={false} activeDot={{ r: 5, fill: '#10b981', stroke: '#fff', strokeWidth: 2 }} name="Trend (7-day avg)" connectNulls />
+                  {/* Daily raw weights */}
+                  <Line type="monotone" dataKey="weight" stroke="#3b82f6" strokeWidth={1.5} dot={{ r: 3.5, fill: '#3b82f6', strokeWidth: 1.5, stroke: '#fff' }} activeDot={{ r: 6, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }} name="Daily weight" />
                 </LineChart>
               </ResponsiveContainer>
             ) : (

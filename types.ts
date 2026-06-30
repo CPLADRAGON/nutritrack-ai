@@ -67,3 +67,33 @@ export interface AppState {
   logs: MealLog[];
   weightHistory: WeightLog[];
 }
+
+// --- Weight Calculation Types ---
+
+export interface WeeklyAverage {
+  weekId: string;       // "2026-W27"
+  label: string;        // "Jun 29 – Jul 5"
+  avg: number;
+  min: number;
+  max: number;
+  count: number;
+}
+
+export interface MovingAveragePoint {
+  date: string;         // YYYY-MM-DD
+  weight: number;
+  movingAvg: number | null;
+}
+
+export interface WeightTrend {
+  weeklyRate: number | null;  // kg per week (negative = losing)
+  direction: 'down' | 'up' | 'stable' | null;
+}
+
+export interface WeekComparison {
+  currentAvg: number;
+  lastAvg: number;
+  delta: number;
+  currentLabel: string;
+  lastLabel: string;
+}

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { ProfileSetup } from './components/ProfileSetup';
 import { Dashboard } from './components/Dashboard';
@@ -6,6 +6,7 @@ import { Login } from './components/Login';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppState, MealLog, UserProfile, WeightLog } from './types';
 import { SheetService } from './services/sheetService';
+import { clearStoredToken, refreshTokenSilently, isTokenExpiringSoon } from './utils/tokenStorage';
 
 type ViewState = 'LOGIN' | 'LOADING_DATA' | 'SETUP' | 'DASHBOARD';
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
@@ -22,7 +23,16 @@ const App: React.FC = () => {
   
   const sheetServiceRef = useRef<SheetService | null>(null);
 
-  const handleTokenExpired = useCallback(() => {
+  const handleTokenExpired = useCallback(async () => {
+    // Try silent refresh first — the token might just be short-lived
+    const newToken = await refreshTokenSilently();
+    if (newToken && sheetServiceRef.current) {
+      sheetServiceRef.current.updateToken(newToken);
+      setSyncStatus('synced');
+      return;
+    }
+
+    clearStoredToken();
     alert('Your session has expired. Please sign in again.');
     setSyncStatus('error');
     setState({ currentUser: null, logs: [], weightHistory: [] });
@@ -126,12 +136,28 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    clearStoredToken();
     setState({ currentUser: null, logs: [], weightHistory: [] });
     setSyncStatus('idle');
     setLastSyncedAt(null);
     sheetServiceRef.current = null;
     setView('LOGIN');
   };
+
+  // Proactive token refresh: every 5 minutes, refresh if expiring within 10 min
+  useEffect(() => {
+    if (view !== 'DASHBOARD' && view !== 'SETUP') return;
+
+    const interval = setInterval(async () => {
+      if (!isTokenExpiringSoon(10 * 60_000)) return;
+      const newToken = await refreshTokenSilently();
+      if (newToken && sheetServiceRef.current) {
+        sheetServiceRef.current.updateToken(newToken);
+      }
+    }, 5 * 60_000);
+
+    return () => clearInterval(interval);
+  }, [view]);
 
   if (view === 'LOADING_DATA') {
      return <div className="h-screen w-screen flex items-center justify-center text-primary text-xl flex-col gap-4">

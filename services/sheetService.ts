@@ -15,6 +15,11 @@ export class SheetService {
     this.onTokenExpired = onTokenExpired;
   }
 
+  /** Update the access token (e.g. after a silent refresh). */
+  updateToken(token: string): void {
+    this.accessToken = token;
+  }
+
   private async fetch(url: string, options: RequestInit = {}) {
     const headers = {
       'Authorization': `Bearer ${this.accessToken}`,
