@@ -131,7 +131,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     calories: user.targetCalories,
     protein: user.targetProtein,
     carbs: user.targetCarbs,
-    fat: user.targetFat
+    fat: user.targetFat,
+    goal: user.goal,
   });
 
   // TDEE State
@@ -233,12 +234,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       user.activityLevel,
     );
 
-    if (Math.abs(newTDEE - user.tdee) > 10) {
-      const macros = calculateMacros(newTDEE, user.weight, user.goal);
+    const macros = calculateMacros(newTDEE, user.weight, user.goal);
+    const tdeeChanged = Math.abs(newTDEE - user.tdee) > 10;
+    const macrosChanged = macros.targetCalories !== user.targetCalories;
+
+    if (tdeeChanged) {
       setToast({
         message: `TDEE recalculated to ${newTDEE} kcal based on your updated profile`,
         type: 'info',
       });
+    } else if (macrosChanged) {
+      setToast({
+        message: `Macros adjusted for ${user.goal.replace('_', ' ').toLowerCase()} goal`,
+        type: 'info',
+      });
+    }
+
+    if (tdeeChanged || macrosChanged) {
       onUpdateUser({
         ...user,
         tdee: newTDEE,
@@ -397,14 +409,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       return;
     }
 
+    const goalChanged = editGoals.goal !== user.goal;
     const updatedUser = {
       ...user,
       targetCalories: cals,
       targetProtein: protein,
       targetCarbs: carbs,
       targetFat: fat,
+      goal: editGoals.goal as GoalType,
     };
     onUpdateUser(updatedUser);
+
+    // If the goal changed, the auto-TDEE effect will recalculate macros — sync state
+    if (goalChanged) {
+      setEditGoals(prev => ({ ...prev, goal: editGoals.goal as GoalType }));
+    }
     setShowGoalsModal(false);
   };
 
@@ -1053,6 +1072,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <h3 className="text-xl leading-6 font-bold text-gray-900 mb-6">Adjust Nutrition Goals</h3>
                 <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
+                    <select
+                      value={editGoals.goal}
+                      onChange={e => setEditGoals({ ...editGoals, goal: e.target.value as GoalType })}
+                      className={inputClass}>
+                      {Object.values(GoalType).map(g => (
+                        <option key={g} value={g}>{g.replace('_', ' ')}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {editGoals.goal === GoalType.LOSE_WEIGHT ? 'TDEE − 500 kcal deficit for fat loss' :
+                       editGoals.goal === GoalType.GAIN_MUSCLE ? 'TDEE + 300 kcal surplus for muscle gain' :
+                       'TDEE maintenance level'}
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Daily Calories (kcal)</label>
                     <input type="number" min="1" max="10000" className={inputClass} value={editGoals.calories} onChange={e => setEditGoals({ ...editGoals, calories: Number(e.target.value) })} />
