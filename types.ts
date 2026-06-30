@@ -12,10 +12,21 @@ export enum ActivityLevel {
 }
 
 export enum MealType {
-  BREAKFAST = '早餐',
-  LUNCH = '午餐',
-  DINNER = '晚餐',
-  SNACK = '加餐'
+  BREAKFAST = 'Breakfast',
+  LUNCH = 'Lunch',
+  DINNER = 'Dinner',
+  SNACK = 'Snack'
+}
+
+/** Migrate legacy Chinese meal-type values to English enum values. */
+export function normalizeMealType(type: string): MealType {
+  const legacy: Record<string, MealType> = {
+    '早餐': MealType.BREAKFAST,
+    '午餐': MealType.LUNCH,
+    '晚餐': MealType.DINNER,
+    '加餐': MealType.SNACK,
+  };
+  return legacy[type] ?? (type as MealType);
 }
 
 export interface UserProfile {

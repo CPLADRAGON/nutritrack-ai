@@ -1,4 +1,4 @@
-import { UserProfile, MealLog, WeightLog } from "../types";
+import { UserProfile, MealLog, WeightLog, normalizeMealType } from "../types";
 import { SPREADSHEET_TITLE } from "../config";
 
 const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -133,7 +133,7 @@ export class SheetService {
       id: row[0],
       date: row[1],
       time: row[2],
-      type: row[3],
+      type: normalizeMealType(row[3]),
       description: row[4],
       calories: Number(row[5]),
       protein: Number(row[6]),

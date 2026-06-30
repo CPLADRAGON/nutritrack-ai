@@ -3,6 +3,7 @@ import { UserProfile, MealLog, WeightLog, MealType, GoalType, WeekComparison, We
 import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import { getMovingAverage, getWeekComparison, getWeightTrend } from '../utils/weightCalculations';
+import { calculateTDEE, calculateMacros } from '../utils/tdeeCalculations';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line, ReferenceLine
@@ -106,6 +107,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [showTDEEModal, setShowTDEEModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [showAllJournal, setShowAllJournal] = useState(false);
+  const INITIAL_DATE_COUNT = 3;
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -115,6 +118,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
   // Chart Range State
   const [calorieRange, setCalorieRange] = useState<number>(7);
   const [weightRange, setWeightRange] = useState<number>(30);
+
+  // Toast notification
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Track last TDEE-sensitive fields to avoid recalc loops
+  const lastProfileSig = useRef<string>('');
 
   // Goals Edit State
   const [editGoals, setEditGoals] = useState({
@@ -202,6 +212,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [showLogModal, showGoalsModal, showWeightModal, showTDEEModal, deleteConfirmId]);
+
+  // Toast auto-dismiss
+  useEffect(() => {
+    if (!toast) return;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 4500);
+    return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); };
+  }, [toast]);
+
+  // Auto-recalculate TDEE when sensitive profile fields change
+  useEffect(() => {
+    const sig = `${user.weight}-${user.activityLevel}-${user.goal}-${user.height}-${user.age}-${user.gender}`;
+    if (sig === lastProfileSig.current) return;
+    lastProfileSig.current = sig;
+
+    const newTDEE = calculateTDEE(
+      user.weight, user.height, user.age,
+      user.gender as 'MALE' | 'FEMALE',
+      user.activityLevel,
+    );
+
+    if (Math.abs(newTDEE - user.tdee) > 10) {
+      const macros = calculateMacros(newTDEE, user.weight, user.goal);
+      setToast({
+        message: `TDEE recalculated to ${newTDEE} kcal based on your updated profile`,
+        type: 'info',
+      });
+      onUpdateUser({
+        ...user,
+        tdee: newTDEE,
+        targetCalories: macros.targetCalories,
+        targetProtein: macros.targetProtein,
+        targetCarbs: macros.targetCarbs,
+        targetFat: macros.targetFat,
+      });
+    }
+  }, [user.weight, user.activityLevel, user.goal, user.height, user.age, user.gender]);
 
   const handleGetSuggestion = async () => {
     setIsSuggesting(true);
@@ -399,6 +446,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const sortedDates = useMemo(() => Object.keys(logsByDate).sort((a, b) => b.localeCompare(a)), [logsByDate]);
 
+  const visibleDates = useMemo(
+    () => showAllJournal ? sortedDates : sortedDates.slice(0, INITIAL_DATE_COUNT),
+    [sortedDates, showAllJournal],
+  );
+
   // Prepare Calorie Chart Data
   const calorieChartData = useMemo(() => {
     const calorieCutoff = getSingaporePastDate(calorieRange);
@@ -473,6 +525,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   return (
     <div className="space-y-6 pb-24">
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-[100] max-w-sm animate-slideDown rounded-2xl border px-5 py-4 shadow-xl text-sm font-bold backdrop-blur-sm ${
+          toast.type === 'info'
+            ? 'border-indigo-100 bg-indigo-50/95 text-indigo-900'
+            : 'border-emerald-100 bg-emerald-50/95 text-emerald-900'
+        }`}>
+          <div className="flex items-center gap-3">
+            {toast.type === 'info' ? (
+              <svg className="w-5 h-5 shrink-0 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            ) : (
+              <svg className="w-5 h-5 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            )}
+            <span>{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 text-current opacity-60 hover:opacity-100 transition-opacity">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Today Summary Hero */}
       <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-sm animate-slideUp">
         <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-emerald-50 via-teal-50/60 to-transparent" aria-hidden="true"></div>
@@ -542,6 +615,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         </div>
       </section>
 
+      {/* Macro Progress */}
+      <div className="flex justify-between items-center animate-slideUp">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Macro Progress</h2>
+          <p className="text-sm text-slate-500">Clear daily targets with nutrition-specific colors.</p>
+        </div>
+        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-bold flex items-center bg-emerald-50 px-3 py-2 rounded-full transition-colors border border-emerald-100">
+          <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+          Edit Goals
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-slideUp delay-75">
+        {macroSummary.map((macro) => {
+          const isOver = macro.value > macro.target;
+          const remaining = macro.target - macro.value;
+          const percent = Math.min((macro.value / macro.target) * 100, 100);
+
+          return (
+            <div key={macro.label} className={`rounded-3xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isOver ? 'ring-2 ring-red-100' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{macro.label}</p>
+                  <div className="mt-3 flex items-end gap-2">
+                    <span className="text-3xl font-extrabold tracking-tight text-slate-950">{macro.value}</span>
+                    <span className="pb-1 text-sm font-semibold text-slate-400">/ {macro.target}{macro.unit}</span>
+                  </div>
+                </div>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${macro.soft} ${macro.text}`} aria-hidden="true">{macro.icon}</div>
+              </div>
+              <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full ${isOver ? 'bg-red-500' : macro.bar}`} style={{ width: `${percent}%` }}></div>
+              </div>
+              <p className={`mt-3 text-sm font-semibold ${isOver ? 'text-red-600' : macro.text}`}>
+                {isOver ? `${Math.abs(remaining)}${macro.unit} over target` : `${remaining}${macro.unit} remaining`}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Weekly Summary */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 animate-slideUp delay-75">
         <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
@@ -584,47 +698,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
           )}
         </div>
       </section>
-
-      {/* Macro Progress */}
-      <div className="flex justify-between items-center animate-slideUp">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Macro Progress</h2>
-          <p className="text-sm text-slate-500">Clear daily targets with nutrition-specific colors.</p>
-        </div>
-        <button onClick={() => setShowGoalsModal(true)} className="text-sm text-primary hover:text-emerald-700 font-bold flex items-center bg-emerald-50 px-3 py-2 rounded-full transition-colors border border-emerald-100">
-          <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-          Edit Goals
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-slideUp delay-75">
-        {macroSummary.map((macro) => {
-          const isOver = macro.value > macro.target;
-          const remaining = macro.target - macro.value;
-          const percent = Math.min((macro.value / macro.target) * 100, 100);
-
-          return (
-            <div key={macro.label} className={`rounded-3xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isOver ? 'ring-2 ring-red-100' : ''}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{macro.label}</p>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-3xl font-extrabold tracking-tight text-slate-950">{macro.value}</span>
-                    <span className="pb-1 text-sm font-semibold text-slate-400">/ {macro.target}{macro.unit}</span>
-                  </div>
-                </div>
-                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${macro.soft} ${macro.text}`} aria-hidden="true">{macro.icon}</div>
-              </div>
-              <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div className={`h-full rounded-full ${isOver ? 'bg-red-500' : macro.bar}`} style={{ width: `${percent}%` }}></div>
-              </div>
-              <p className={`mt-3 text-sm font-semibold ${isOver ? 'text-red-600' : macro.text}`}>
-                {isOver ? `${Math.abs(remaining)}${macro.unit} over target` : `${remaining}${macro.unit} remaining`}
-              </p>
-            </div>
-          );
-        })}
-      </div>
 
       {/* AI Advice Banner */}
       <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6 animate-fadeIn delay-100">
@@ -797,7 +870,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
         <div className="space-y-4 p-4 md:hidden">
           {sortedDates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400">No meals logged yet</div>
-          ) : sortedDates.map(date => {
+          ) : visibleDates.map(date => {
             const dayLogs = [...logsByDate[date]].sort((a, b) => a.time.localeCompare(b.time));
             const dayTotalCals = dayLogs.reduce((a, c) => a + c.calories, 0);
 
@@ -834,6 +907,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               </section>
             );
           })}
+          {sortedDates.length > INITIAL_DATE_COUNT && (
+            <button
+              onClick={() => setShowAllJournal(!showAllJournal)}
+              className="w-full py-3 text-sm font-bold text-primary hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-2xl transition-colors"
+            >
+              {showAllJournal ? 'Show less' : `Show all ${sortedDates.length} days`}
+            </button>
+          )}
         </div>
 
         <div className="hidden overflow-x-auto md:block">
@@ -851,7 +932,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-50">
-              {sortedDates.map(date => {
+              {visibleDates.map(date => {
                 const dayLogs = logsByDate[date].sort((a, b) => a.time.localeCompare(b.time));
                 const dayTotalCals = dayLogs.reduce((a, c) => a + c.calories, 0);
                 const dayTotalP = dayLogs.reduce((a, c) => a + c.protein, 0);
@@ -896,6 +977,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
               })}
             </tbody>
           </table>
+          {sortedDates.length > INITIAL_DATE_COUNT && (
+            <div className="px-6 py-4 border-t border-slate-100 text-center">
+              <button
+                onClick={() => setShowAllJournal(!showAllJournal)}
+                className="text-sm font-bold text-primary hover:text-emerald-700 transition-colors"
+              >
+                {showAllJournal ? 'Show less' : `Show all ${sortedDates.length} days`}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1089,14 +1180,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                 {/* Manual Entry Form */}
                 <div className="space-y-5">
                   <p className="text-sm font-bold text-gray-700 border-b pb-2">Review & Save</p>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-gray-500 mb-1">Date</label>
-                      <input type="date" className={inputClass} value={newLog.date} onChange={e => setNewLog({ ...newLog, date: e.target.value })} />
+                      <input type="date" className={inputClass + " min-h-[44px]"} value={newLog.date} onChange={e => setNewLog({ ...newLog, date: e.target.value })} />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-gray-500 mb-1">Type</label>
-                      <select className={inputClass} value={newLog.type} onChange={e => setNewLog({ ...newLog, type: e.target.value as MealType })}>
+                      <select className={inputClass + " min-h-[44px]"} value={newLog.type} onChange={e => setNewLog({ ...newLog, type: e.target.value as MealType })}>
                         {Object.values(MealType).map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
