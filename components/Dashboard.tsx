@@ -215,6 +215,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); };
   }, [toast]);
 
+  // Reset the form to current user values whenever the modal opens
+  useEffect(() => {
+    if (showNutritionModal) {
+      setNutritionForm({
+        goal: user.goal,
+        activityLevel: user.activityLevel,
+        tdee: user.tdee || calculateTDEE(user.weight, user.height, user.age, user.gender as 'MALE' | 'FEMALE', user.activityLevel),
+        calories: user.targetCalories,
+        protein: user.targetProtein,
+        carbs: user.targetCarbs,
+        fat: user.targetFat,
+      });
+    }
+  }, [showNutritionModal]);
+
   const handleGetSuggestion = async () => {
     setIsSuggesting(true);
     const remaining = {
@@ -252,13 +267,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const handleGoalChange = (goal: GoalType) => {
     const macros = calculateMacros(nutritionForm.tdee, user.weight, goal);
-    setNutritionForm(prev => ({ ...prev, goal, ...macros }));
+    setNutritionForm(prev => ({
+      ...prev,
+      goal,
+      calories: macros.targetCalories,
+      protein: macros.targetProtein,
+      carbs: macros.targetCarbs,
+      fat: macros.targetFat,
+    }));
   };
 
   const handleActivityChange = (activity: string) => {
     const newTDEE = calculateTDEE(user.weight, user.height, user.age, user.gender as 'MALE' | 'FEMALE', activity as any);
     const macros = calculateMacros(newTDEE, user.weight, nutritionForm.goal as any);
-    setNutritionForm(prev => ({ ...prev, activityLevel: activity as any, tdee: newTDEE, ...macros }));
+    setNutritionForm(prev => ({
+      ...prev,
+      activityLevel: activity as any,
+      tdee: newTDEE,
+      calories: macros.targetCalories,
+      protein: macros.targetProtein,
+      carbs: macros.targetCarbs,
+      fat: macros.targetFat,
+    }));
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
