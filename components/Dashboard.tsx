@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { UserProfile, MealLog, WeightLog, MealType, GoalType, ActivityLevel, WeekComparison, WeightTrend } from '../types';
-import { analyzeFood, getDailyAdvice, getFoodSuggestion, generatePlanFromProfile } from '../services/geminiService';
+import { analyzeFood, getDailyAdvice, getFoodSuggestion } from '../services/geminiService';
 import { getSingaporeDate, getSingaporeTime, getSingaporePastDate } from '../utils/dateUtils';
 import { getMovingAverage, getWeekComparison, getWeightTrend } from '../utils/weightCalculations';
 import { calculateTDEE, calculateMacros } from '../utils/tdeeCalculations';
@@ -111,7 +111,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [isCalculatingTDEE, setIsCalculatingTDEE] = useState(false);
   const [aiAdvice, setAiAdvice] = useState<string>('');
 
   // Chart Range State
@@ -232,24 +231,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
       setAiAdvice("Couldn't get a suggestion right now. Try again later.");
     } finally {
       setIsSuggesting(false);
-    }
-  };
-
-  const handleRecalcWithAI = async () => {
-    setIsCalculatingTDEE(true);
-    try {
-      const plan = await generatePlanFromProfile({
-        ...user,
-        activityLevel: nutritionForm.activityLevel as any,
-        goal: nutritionForm.goal as any,
-      });
-      const newTDEE = plan.tdee;
-      const macros = calculateMacros(newTDEE, user.weight, nutritionForm.goal as any);
-      setNutritionForm(prev => ({ ...prev, tdee: newTDEE, ...macros }));
-    } catch (e) {
-      alert("Could not calculate TDEE automatically.");
-    } finally {
-      setIsCalculatingTDEE(false);
     }
   };
 
@@ -1021,8 +1002,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                       <span className="text-gray-500">TDEE (maintenance)</span>
                       <span className="font-bold text-right text-gray-900">{nutritionForm.tdee} kcal</span>
-                      <span className="text-gray-500">Daily Target</span>
-                      <span className="font-bold text-right text-gray-900">{nutritionForm.calories} kcal</span>
+                      <span className="text-emerald-700 font-semibold">
+                        Target ({nutritionForm.goal === GoalType.LOSE_WEIGHT ? '−500 deficit' : nutritionForm.goal === GoalType.GAIN_MUSCLE ? '+300 surplus' : 'maintenance'})
+                      </span>
+                      <span className="font-bold text-right text-emerald-700">{nutritionForm.calories} kcal</span>
                       <span className="text-blue-600 font-semibold">Protein</span>
                       <span className="font-bold text-right text-gray-900">{nutritionForm.protein} g</span>
                       <span className="text-orange-600 font-semibold">Carbs</span>
@@ -1030,25 +1013,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
                       <span className="text-purple-600 font-semibold">Fat</span>
                       <span className="font-bold text-right text-gray-900">{nutritionForm.fat} g</span>
                     </div>
+                    <p className="text-xs text-gray-400 text-center border-t border-emerald-100 pt-2">
+                      Changing the goal adjusts the target calories and macro split. TDEE stays the same.
+                    </p>
                   </div>
-
-                  {/* Recalculate with AI */}
-                  <button
-                    onClick={handleRecalcWithAI}
-                    disabled={isCalculatingTDEE}
-                    className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none transition-colors"
-                  >
-                    {isCalculatingTDEE ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-purple-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Recalculating...
-                      </>
-                    ) : (
-                      <>
-                        <SparklesIcon className="w-4 h-4" /> Recalculate with AI
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
