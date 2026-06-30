@@ -178,11 +178,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <div>
               <button
                 onClick={handleGoogleLogin}
-                disabled={!!error}
+                disabled={!!error && error !== "Session expired. Sign in again to continue."}
                 className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 shadow-sm border-gray-200 transition-all ${error ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'}`}
               >
                 <span className="absolute left-0 inset-y-0 flex items-center pl-3">
-                  <img className={`h-5 w-5 ${error ? 'grayscale opacity-50' : ''}`} src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google logo" />
+                  <img className={`h-5 w-5 ${!!error && error !== "Session expired. Sign in again to continue." ? 'grayscale opacity-50' : ''}`} src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google logo" />
                 </span>
                 Sign in with Google
               </button>
