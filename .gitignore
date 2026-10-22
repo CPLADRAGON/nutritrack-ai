@@ -32,3 +32,4 @@ dist-ssr
 # Temp / tool-generated
 logo-concepts.html
 .playwright-mcp/
+.wrangler/
