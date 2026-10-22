@@ -1,5 +1,3 @@
-import { GOOGLE_CLIENT_ID } from '../config';
-
 const STORAGE_KEY = 'nutritrack_google_token';
 
 interface StoredToken {
@@ -56,35 +54,32 @@ export function clearStoredToken(): void {
 }
 
 /**
- * Attempt silent OAuth token refresh via GIS.
- * Returns the new access token or null if the silent refresh failed.
+ * Get a fresh access token from our own backend. The backend holds the Google
+ * refresh token in a server-side session, so this is a plain same-origin fetch:
+ * no popup, no user gesture, works on page load.
  */
-export function refreshTokenSilently(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const google = (window as any).google;
-    if (!google?.accounts?.oauth2 || !GOOGLE_CLIENT_ID) {
-      resolve(null);
-      return;
-    }
+export async function refreshTokenSilently(): Promise<string | null> {
+  try {
+    const response = await fetch('/api/auth/token', { headers: { Accept: 'application/json' } });
+    if (!response.ok) return null;
 
-    try {
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
-        callback: (response: any) => {
-          if (response.access_token) {
-            storeToken(response.access_token, response.expires_in);
-            resolve(response.access_token);
-          } else {
-            resolve(null);
-          }
-        },
-        error_callback: () => resolve(null),
-      });
+    const data = await response.json();
+    if (!data?.access_token) return null;
 
-      client.requestAccessToken({ prompt: 'none' });
-    } catch {
-      resolve(null);
-    }
-  });
+    storeToken(data.access_token, Number(data.expires_in) || 3600);
+    return data.access_token;
+  } catch (e) {
+    console.warn('Token refresh failed', e);
+    return null;
+  }
+}
+
+/** Clear the local token and end the server-side session. */
+export async function logoutSession(): Promise<void> {
+  clearStoredToken();
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) {
+    console.warn('Failed to end session', e);
+  }
 }

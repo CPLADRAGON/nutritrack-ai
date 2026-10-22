@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { UserProfile, MealLog } from "../types";
+import { getSingaporeTime } from "../utils/dateUtils";
 
 declare const process: {
   env: {
@@ -7,7 +8,7 @@ declare const process: {
   };
 };
 
-const GEMINI_MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+const GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
 
@@ -192,23 +193,47 @@ export const getDailyAdvice = async (profile: UserProfile, logs: MealLog[]): Pro
 
 export const getFoodSuggestion = async (
   remaining: { calories: number; protein: number; carbs: number; fat: number },
-  goal: string
+  goal: string,
+  todayMeals: MealLog[] = []
 ): Promise<string> => {
   const ai = getAiClient();
 
-  const prompt = `
-    I have the following macro allowance left for today:
-    Calories: ${remaining.calories} kcal
-    Protein: ${remaining.protein} g
-    Carbs: ${remaining.carbs} g
-    Fat: ${remaining.fat} g
-    
-    My overall goal is: ${goal}.
+  const time = getSingaporeTime();
+  const hour = Number(time.slice(0, 2));
+  const upcomingMeal = hour < 11 ? 'breakfast' : hour < 15 ? 'lunch' : hour < 17 ? 'an afternoon snack' : hour < 21 ? 'dinner' : 'a late-evening snack';
 
-    Based on these remaining numbers, suggest 2 or 3 specific, simple snack or meal options that fit within this budget.
-    If the numbers are negative (meaning I overate), suggest something extremely light like tea or cucumber slices.
-    Keep the answer conversational, short, and appetizing. Max 50 words.
-    Markdown is allowed: use **bold** for food names and a short numbered list if helpful.
+  const eatenToday = todayMeals.length
+    ? todayMeals.map(m => `${m.type} — ${m.description} (${Math.round(m.calories)} kcal)`).join('; ')
+    : 'nothing yet';
+
+  const goalHints: Record<string, string> = {
+    LOSE_WEIGHT: 'losing fat while keeping protein high',
+    GAIN_MUSCLE: 'building muscle',
+    MAINTAIN: 'maintaining weight',
+  };
+  const goalText = goalHints[goal] ?? goal;
+
+  // Rotate the format so repeated clicks don't collapse onto the same few foods.
+  const formats = [
+    'a hawker centre or kopitiam meal',
+    'a quick supermarket or convenience-store pick',
+    'a simple home-cooked dish',
+    'a cafe or restaurant order',
+  ];
+  const formatHint = formats[Math.floor(Math.random() * formats.length)];
+
+  const prompt = `
+    It is ${time} (Singapore time), so the next meal is ${upcomingMeal}. The user's goal is ${goalText}.
+    Already eaten today: ${eatenToday}.
+    Remaining allowance: ${Math.round(remaining.calories)} kcal, ${Math.round(remaining.protein)} g protein, ${Math.round(remaining.carbs)} g carbs, ${Math.round(remaining.fat)} g fat.
+
+    Suggest 2-3 things they could realistically eat now in Singapore — everyday options from hawker centres, kopitiams, supermarkets, or a simple home kitchen. At least one option should be ${formatHint}.
+    - Each option must be a different format or cuisine, and must not repeat anything eaten today.
+    - Avoid generic diet-app defaults (Greek yogurt, chicken breast with broccoli, salmon, almonds, protein shakes) unless nothing more suitable fits.
+    - Give a realistic portion with approximate calories and protein.
+    - Match the remaining macros and the time of day.
+    - If the calorie allowance is zero or negative, suggest only something very light.
+    Keep it under 90 words. Use a numbered list with **bold** food names, one short line each. No intro sentence.
   `;
 
   try {

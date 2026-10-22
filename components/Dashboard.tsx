@@ -240,7 +240,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, logs, weightHistory,
     };
 
     try {
-      const suggestion = await getFoodSuggestion(remaining, user.goal);
+      const suggestion = await getFoodSuggestion(remaining, user.goal, todayLogs);
       setAiAdvice(suggestion);
     } catch (e) {
       setAiAdvice("Couldn't get a suggestion right now. Try again later.");
